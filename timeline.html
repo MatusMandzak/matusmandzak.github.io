@@ -38,6 +38,22 @@
     h3 {
       line-height: 1.0;
     }
+
+    .timeline-box {
+      padding-left: 1vw;
+    }
+
+    .timeline-title {
+      font-size: 1.3rem;
+      color: #00004c;
+      text-decoration: none;
+      font-weight: 700;
+    }
+
+    .timeline-text {
+      font-size: 1rem;
+      padding: 0.3rem 0;
+    }
   </style>
   <meta charset="utf-8">
   <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
@@ -49,7 +65,6 @@
   <div style="margin-top: 30px; height: 40px">
     <h1 style="float: left; margin: 0; padding-right: 10px">Matúš Mandzák</h1>
     <img src="img/logo.svg" style="height: 100%;">
-
   </div>
   <hr>
   <div style="display: flex; justify-content: space-between">
@@ -57,27 +72,39 @@
     <div><a href="CV.pdf">CV</a></div>
   </div>
   <br>
+
   <nav style="text-align: center;">
     <div>
       <a href="./index.html">Home</a>
       <a href="./timeline.html">Timeline</a>
     </div>
   </nav>
-  <br>
-  <div>
-    <h3>Who am I?</h3>
-    <ul style="padding-left: 5%; width:70%">
-      <p>Hi! :) <br> My name is Matúš Mandzák and I'm currently High School student. I've been coding since 2019 and
-        started learning CyberSec in 2023.</p>
-    </ul>
-  </div>
-  <div class="vert-split"> </div>
-  <h3>Contact me:</h3>
-  <ul>
-    <div><a href="https://github.com/matusmandzak"><img src="img/github.png" width="25px"></a></div>
-    <li><a href="mailto:mandzi.matus@gmail.com">mandzi.matus@gmail.com</a></li>
-  </ul>
 
+  <br>
+  <br>
+
+  <div class="timeline">
+    <div class="timeline-box">
+      <div class="timeline-title">2023</div>
+      <ul>
+        <li class="timeline-text">Comptia Security+</li>
+        <li class="timeline-text"><a href="http://www.securitytube.net/groups?operation=view&groupId=5">Linux Assembly
+            101</a></li>
+        <li class="timeline-text"><a href="http://www.securitytube.net">GNU debugger 101</a></li>
+        <li class="timeline-text"><a href="https://pwn.college">pwn.college</a> (binary exploitation)</li>
+        <li class="timeline-text">SANS FOR610 (reverse engineering malware)</li>
+        <li class="timeline-text">succesful solver of Informatics Course <a href="https://ksi.fi.muni.cz/">KSI</a> (MUNI
+          Brno)</li>
+      </ul>
+    </div>
+    <div class="vert-split"></div>
+    <div class="timeline-box">
+      <div class="timeline-title">2019</div>
+      <ul>
+        <li class="timeline-text">Started coding in Python</li>
+      </ul>
+    </div>
+  </div>
 </body>
 
 </html>
