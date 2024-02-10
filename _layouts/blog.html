@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="{{ site.lang | default: "en-US" }}">
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="utf-8">
+    <title>{{ page.title }} - {{ site.title }}</title>
+    <link rel="stylesheet" href="{{ "/assets/css/main.css" | relative_url }}">
+    <link rel="stylesheet" href="{{ "/assets/css/blog.css" | relative_url }}">
+  </head>
+  <body>
+    <div class="centered">
+      {%- include header.html -%}
+    
+    {% if site.paginate %}
+      {% assign posts = paginator.posts %}
+    {% else %}
+      {% assign posts = site.posts %}
+    {% endif %}
+  
+    
+    {%- if posts.size > 0 -%}
+      {%- if page.list_title -%}
+        <div class="centered mt-12 grey2 text-s">{{ page.list_title }}</div>
+      {%- endif -%}
+      <div class="grey2 no-margin centered mt-3">
+        {%- assign date_format = site.minima.date_format | default: "%b %-d, %Y" -%}
+        {%- for post in posts -%}
+        <a class="hover:bg-beige mb-3 mt-3  transition-colors block pa-3" href="{{ post.url | relative_url }}">
+            <div class="">
+                <div class="no-margin text-l grey1">
+                    {{ post.title | escape }}
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide-icon lucide lucide-arrow-up-right inline text-neutral-400"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg>
+                </div>
+                
+                <div class="text-s grey3">{{ post.date | date: date_format }}</div>
+                
+            </div>
+            <div class="text-black mt-3">
+                {%- if site.show_excerpts -%}
+                    {{ post.excerpt }}
+                {%- endif -%}
+            </div>
+        </a>
+        {%- endfor -%}
+    </div>
+  
+      {% if site.paginate %}
+        <div class="pager">
+          <ul class="pagination">
+          {%- if paginator.previous_page %}
+            <li><a href="{{ paginator.previous_page_path | relative_url }}" class="previous-page">{{ paginator.previous_page }}</a></li>
+          {%- else %}
+            <li><div class="pager-edge">•</div></li>
+          {%- endif %}
+            <li><div class="current-page">{{ paginator.page }}</div></li>
+          {%- if paginator.next_page %}
+            <li><a href="{{ paginator.next_page_path | relative_url }}" class="next-page">{{ paginator.next_page }}</a></li>
+          {%- else %}
+            <li><div class="pager-edge">•</div></li>
+          {%- endif %}
+          </ul>
+        </div>
+      {%- endif %}
+  
+    {%- endif -%}
+
+    
+      {%- include footer-off.html -%}
+
+
+</div>
+</body>
+</html>

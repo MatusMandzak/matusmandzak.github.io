@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="utf-8">
+    <title>Matus Mandzak</title>
+    <link rel="stylesheet" href="/assets/css/main.css">
+    <link rel="stylesheet" href="/assets/css/blog.css">
+    <link rel="stylesheet" href="/assets/css/languages.css">
+  </head>
+  <body>
+    <div class="centered"><header class="flex justify-between align-start centered mb-3"><h1 class="no-margin flex text-xxl font-bold text-black">
+      <a href="/">Matus Mandzak <span class="grey3 font-light">- PicoCTF M A T R I X</span></a>
+    </h1>
+    <nav class="flex grey2"><a class="page-link transition-colors hover:text-black margin-1-5 text-l" href="/posts.html">blog</a></nav>
+  </header><p class="centered font-light no-margin text-xl grey3  mb-12">   </p>
+    <div class="centered"><p><em>This one was really tough, but cool af.</em></p>
+
+<p>Analyzing binary we can simple see the main function runs  a while loop of another function which uses some bytes as arguments.</p>
+
+<p>By further analysis we found out it is custom assembly so we have to decode the bytes and what they do.</p>
+
+<p>From the function that is being run in a while loop:</p>
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">undefined8</span> <span class="nf">step</span><span class="p">(</span><span class="n">state</span> <span class="o">*</span><span class="n">state</span><span class="p">,</span><span class="n">exitc</span> <span class="o">*</span><span class="n">out</span><span class="p">)</span>
+
+<span class="p">{</span>
+  <span class="n">undefined</span> <span class="o">*</span><span class="n">bVar8</span><span class="p">;</span>
+  <span class="n">ushort</span> <span class="n">cur</span><span class="o">-</span><span class="n">ip</span><span class="p">;</span>
+  <span class="n">ushort</span> <span class="n">next</span><span class="o">-</span><span class="n">ip</span><span class="p">;</span>
+  <span class="n">byte</span> <span class="o">*</span><span class="n">puVar1</span><span class="p">;</span>
+  <span class="n">byte</span> <span class="n">cur</span><span class="o">-</span><span class="n">code</span><span class="p">;</span>
+  <span class="kt">long</span> <span class="n">lVar4</span><span class="p">;</span>
+  <span class="n">ushort</span> <span class="o">*</span><span class="n">psVar5</span><span class="p">;</span>
+  <span class="kt">short</span> <span class="n">sVar1</span><span class="p">;</span>
+  <span class="n">undefined</span> <span class="n">uVar1</span><span class="p">;</span>
+  
+  <span class="n">lVar4</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">code</span><span class="p">;</span>
+  <span class="n">cur</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">ip</span><span class="p">;</span>
+  <span class="n">next</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="n">cur</span><span class="o">-</span><span class="n">ip</span> <span class="o">+</span> <span class="mi">1</span><span class="p">;</span>
+  <span class="n">state</span><span class="o">-&gt;</span><span class="n">ip</span> <span class="o">=</span> <span class="n">next</span><span class="o">-</span><span class="n">ip</span><span class="p">;</span>
+  <span class="n">cur</span><span class="o">-</span><span class="n">code</span> <span class="o">=</span> <span class="o">*</span><span class="p">(</span><span class="n">byte</span> <span class="o">*</span><span class="p">)(</span><span class="n">lVar4</span> <span class="o">+</span> <span class="p">(</span><span class="n">ulong</span><span class="p">)</span><span class="n">cur</span><span class="o">-</span><span class="n">ip</span><span class="p">);</span>
+  <span class="k">switch</span><span class="p">(</span><span class="n">cur</span><span class="o">-</span><span class="n">code</span><span class="p">)</span> <span class="p">{</span>
+  <span class="k">case</span> <span class="mi">0</span><span class="p">:</span>
+    <span class="k">break</span><span class="p">;</span>
+  <span class="k">case</span> <span class="mi">1</span><span class="p">:</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">out</span> <span class="o">==</span> <span class="p">(</span><span class="n">exitc</span> <span class="o">*</span><span class="p">)</span><span class="mh">0x0</span><span class="p">)</span> <span class="p">{</span>
+      <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="n">psVar5</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span><span class="p">;</span>
+    <span class="o">*</span><span class="p">(</span><span class="n">undefined</span> <span class="o">*</span><span class="p">)</span><span class="n">out</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="n">cur</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">];</span>
+    <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">=</span> <span class="n">psVar5</span> <span class="o">+</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+    <span class="n">out</span><span class="o">-&gt;</span><span class="n">exit</span> <span class="o">=</span> <span class="n">cur</span><span class="o">-</span><span class="n">ip</span><span class="p">;</span>
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="k">case</span> <span class="mh">0x10</span><span class="p">:</span>
+    <span class="n">psVar5</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span><span class="p">;</span>
+    <span class="n">cur</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">];</span>
+    <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">=</span> <span class="n">psVar5</span> <span class="o">+</span> <span class="mi">1</span><span class="p">;</span>
+    <span class="o">*</span><span class="n">psVar5</span> <span class="o">=</span> <span class="n">cur</span><span class="o">-</span><span class="n">ip</span><span class="p">;</span>
+    <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+  <span class="k">case</span> <span class="mh">0x11</span><span class="p">:</span>
+    <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">+</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+    <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+  <span class="k">case</span> <span class="mh">0x12</span><span class="p">:</span>
+    <span class="n">psVar5</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span><span class="p">;</span>
+    <span class="n">next</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">];</span>
+    <span class="n">cur</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">];</span>
+    <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">=</span> <span class="n">psVar5</span> <span class="o">+</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+    <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">next</span><span class="o">-</span><span class="n">ip</span> <span class="o">+</span> <span class="n">cur</span><span class="o">-</span><span class="n">ip</span><span class="p">;</span>
+    <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+  <span class="k">case</span> <span class="mh">0x13</span><span class="p">:</span>
+    <span class="n">psVar5</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span><span class="p">;</span>
+    <span class="n">next</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">];</span>
+    <span class="n">cur</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">];</span>
+    <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">=</span> <span class="n">psVar5</span> <span class="o">+</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+    <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">next</span><span class="o">-</span><span class="n">ip</span> <span class="o">-</span> <span class="n">cur</span><span class="o">-</span><span class="n">ip</span><span class="p">;</span>
+    <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+  <span class="k">case</span> <span class="mh">0x14</span><span class="p">:</span>
+    <span class="n">psVar5</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span><span class="p">;</span>
+    <span class="n">cur</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">];</span>
+    <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">];</span>
+    <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">=</span> <span class="n">psVar5</span><span class="p">;</span>
+    <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">cur</span><span class="o">-</span><span class="n">ip</span><span class="p">;</span>
+    <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+  <span class="k">case</span> <span class="mh">0x20</span><span class="p">:</span>
+    <span class="n">psVar5</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span><span class="p">;</span>
+    <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">=</span> <span class="n">psVar5</span> <span class="o">+</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+    <span class="n">cur</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">];</span>
+    <span class="n">psVar5</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">alt_stack</span><span class="p">;</span>
+    <span class="n">state</span><span class="o">-&gt;</span><span class="n">alt_stack</span> <span class="o">=</span> <span class="n">psVar5</span> <span class="o">+</span> <span class="mi">1</span><span class="p">;</span>
+    <span class="o">*</span><span class="n">psVar5</span> <span class="o">=</span> <span class="n">cur</span><span class="o">-</span><span class="n">ip</span><span class="p">;</span>
+    <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+  <span class="k">case</span> <span class="mh">0x21</span><span class="p">:</span>
+    <span class="n">puVar1</span> <span class="o">=</span> <span class="p">(</span><span class="n">byte</span> <span class="o">*</span><span class="p">)</span><span class="n">state</span><span class="o">-&gt;</span><span class="n">alt_stack</span><span class="p">;</span>
+    <span class="n">state</span><span class="o">-&gt;</span><span class="n">alt_stack</span> <span class="o">=</span> <span class="p">(</span><span class="n">undefined2</span> <span class="o">*</span><span class="p">)(</span><span class="n">puVar1</span> <span class="o">+</span> <span class="o">-</span><span class="mi">2</span><span class="p">);</span>
+    <span class="n">cur</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="o">*</span><span class="p">(</span><span class="n">ushort</span> <span class="o">*</span><span class="p">)(</span><span class="n">puVar1</span> <span class="o">+</span> <span class="o">-</span><span class="mi">2</span><span class="p">);</span>
+    <span class="n">psVar5</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span><span class="p">;</span>
+    <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">=</span> <span class="n">psVar5</span> <span class="o">+</span> <span class="mi">1</span><span class="p">;</span>
+    <span class="o">*</span><span class="n">psVar5</span> <span class="o">=</span> <span class="n">cur</span><span class="o">-</span><span class="n">ip</span><span class="p">;</span>
+    <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+  <span class="k">case</span> <span class="mh">0x30</span><span class="p">:</span>
+    <span class="n">cur</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">];</span>
+    <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">+</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+    <span class="n">state</span><span class="o">-&gt;</span><span class="n">ip</span> <span class="o">=</span> <span class="n">cur</span><span class="o">-</span><span class="n">ip</span><span class="p">;</span>
+    <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+  <span class="k">case</span> <span class="mh">0x31</span><span class="p">:</span>
+    <span class="n">psVar5</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span><span class="p">;</span>
+    <span class="n">next</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">];</span>
+    <span class="n">cur</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">];</span>
+    <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">=</span> <span class="n">psVar5</span> <span class="o">+</span> <span class="o">-</span><span class="mi">2</span><span class="p">;</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">next</span><span class="o">-</span><span class="n">ip</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+<span class="nl">LAB_0010154b:</span>
+      <span class="n">state</span><span class="o">-&gt;</span><span class="n">ip</span> <span class="o">=</span> <span class="n">cur</span><span class="o">-</span><span class="n">ip</span><span class="p">;</span>
+      <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="k">break</span><span class="p">;</span>
+  <span class="k">case</span> <span class="mh">0x32</span><span class="p">:</span>
+    <span class="n">psVar5</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span><span class="p">;</span>
+    <span class="n">next</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">];</span>
+    <span class="n">cur</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">];</span>
+    <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">=</span> <span class="n">psVar5</span> <span class="o">+</span> <span class="o">-</span><span class="mi">2</span><span class="p">;</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">next</span><span class="o">-</span><span class="n">ip</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span> <span class="k">goto</span> <span class="n">LAB_0010154b</span><span class="p">;</span>
+    <span class="k">break</span><span class="p">;</span>
+  <span class="k">case</span> <span class="mh">0x33</span><span class="p">:</span>
+    <span class="n">psVar5</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span><span class="p">;</span>
+    <span class="n">next</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">];</span>
+    <span class="n">cur</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">];</span>
+    <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">=</span> <span class="n">psVar5</span> <span class="o">+</span> <span class="o">-</span><span class="mi">2</span><span class="p">;</span>
+    <span class="k">if</span> <span class="p">((</span><span class="kt">short</span><span class="p">)</span><span class="n">next</span><span class="o">-</span><span class="n">ip</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span> <span class="k">goto</span> <span class="n">LAB_0010154b</span><span class="p">;</span>
+    <span class="k">break</span><span class="p">;</span>
+  <span class="k">case</span> <span class="mh">0x34</span><span class="p">:</span>
+    <span class="n">psVar5</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span><span class="p">;</span>
+    <span class="n">next</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">];</span>
+    <span class="n">cur</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="n">psVar5</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">];</span>
+    <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">=</span> <span class="n">psVar5</span> <span class="o">+</span> <span class="o">-</span><span class="mi">2</span><span class="p">;</span>
+    <span class="k">if</span> <span class="p">((</span><span class="kt">short</span><span class="p">)</span><span class="n">next</span><span class="o">-</span><span class="n">ip</span> <span class="o">&lt;</span> <span class="mi">1</span><span class="p">)</span> <span class="k">goto</span> <span class="n">LAB_0010154b</span><span class="p">;</span>
+    <span class="k">break</span><span class="p">;</span>
+  <span class="nl">default:</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">cur</span><span class="o">-</span><span class="n">code</span> <span class="o">==</span> <span class="mh">0xc0</span><span class="p">)</span> <span class="p">{</span>
+      <span class="n">bVar8</span><span class="p">.</span><span class="n">_0_1_</span> <span class="o">=</span> <span class="p">(</span><span class="o">*</span><span class="p">(</span><span class="n">code</span> <span class="o">*</span><span class="p">)</span><span class="n">state</span><span class="o">-&gt;</span><span class="n">getc_stdin</span><span class="p">)();</span>
+      <span class="n">psVar5</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span><span class="p">;</span>
+      <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">=</span> <span class="n">psVar5</span> <span class="o">+</span> <span class="mi">1</span><span class="p">;</span>
+      <span class="o">*</span><span class="n">psVar5</span> <span class="o">=</span> <span class="p">(</span><span class="n">ushort</span><span class="p">)(</span><span class="n">byte</span><span class="p">)</span><span class="n">bVar8</span><span class="p">;</span>
+      <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">cur</span><span class="o">-</span><span class="n">code</span> <span class="o">&lt;</span> <span class="mh">0xc1</span><span class="p">)</span> <span class="p">{</span>
+      <span class="k">if</span> <span class="p">(</span><span class="n">cur</span><span class="o">-</span><span class="n">code</span> <span class="o">==</span> <span class="mh">0x80</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">sVar1</span> <span class="o">=</span> <span class="mi">2</span><span class="p">;</span>
+        <span class="n">next</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="p">(</span><span class="n">ushort</span><span class="p">)</span><span class="o">*</span><span class="p">(</span><span class="kt">char</span> <span class="o">*</span><span class="p">)(</span><span class="n">lVar4</span> <span class="o">+</span> <span class="p">(</span><span class="n">ulong</span><span class="p">)</span><span class="n">next</span><span class="o">-</span><span class="n">ip</span><span class="p">);</span>
+      <span class="p">}</span>
+      <span class="k">else</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">cur</span><span class="o">-</span><span class="n">code</span> <span class="o">!=</span> <span class="mh">0x81</span><span class="p">)</span> <span class="k">goto</span> <span class="n">switchD_0010137b_caseD_2</span><span class="p">;</span>
+        <span class="n">sVar1</span> <span class="o">=</span> <span class="mi">3</span><span class="p">;</span>
+        <span class="n">next</span><span class="o">-</span><span class="n">ip</span> <span class="o">=</span> <span class="o">*</span><span class="p">(</span><span class="n">ushort</span> <span class="o">*</span><span class="p">)(</span><span class="n">lVar4</span> <span class="o">+</span> <span class="p">(</span><span class="n">ulong</span><span class="p">)</span><span class="n">next</span><span class="o">-</span><span class="n">ip</span><span class="p">);</span>
+      <span class="p">}</span>
+      <span class="n">psVar5</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span><span class="p">;</span>
+      <span class="n">state</span><span class="o">-&gt;</span><span class="n">ip</span> <span class="o">=</span> <span class="n">cur</span><span class="o">-</span><span class="n">ip</span> <span class="o">+</span> <span class="n">sVar1</span><span class="p">;</span>
+      <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">=</span> <span class="n">psVar5</span> <span class="o">+</span> <span class="mi">1</span><span class="p">;</span>
+      <span class="o">*</span><span class="n">psVar5</span> <span class="o">=</span> <span class="n">next</span><span class="o">-</span><span class="n">ip</span><span class="p">;</span>
+      <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">cur</span><span class="o">-</span><span class="n">code</span> <span class="o">==</span> <span class="mh">0xc1</span><span class="p">)</span> <span class="p">{</span>
+      <span class="n">uVar1</span> <span class="o">=</span> <span class="o">*</span><span class="p">(</span><span class="n">undefined</span> <span class="o">*</span><span class="p">)(</span><span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">+</span> <span class="o">-</span><span class="mi">1</span><span class="p">);</span>
+      <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">=</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">stack</span> <span class="o">+</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+      <span class="p">(</span><span class="o">*</span><span class="p">(</span><span class="n">code</span> <span class="o">*</span><span class="p">)</span><span class="n">state</span><span class="o">-&gt;</span><span class="n">putc_stdout</span><span class="p">)(</span><span class="n">uVar1</span><span class="p">);</span>
+      <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+    <span class="p">}</span>
+  <span class="k">case</span> <span class="mi">2</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mi">3</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mi">4</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mi">5</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mi">6</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mi">7</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mi">8</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mi">9</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mi">10</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0xb</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0xc</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0xd</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0xe</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0xf</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x15</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x16</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x17</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x18</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x19</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x1a</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x1b</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x1c</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x1d</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x1e</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x1f</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x22</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x23</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x24</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x25</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x26</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x27</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x28</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x29</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x2a</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x2b</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x2c</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x2d</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x2e</span><span class="p">:</span>
+  <span class="k">case</span> <span class="mh">0x2f</span><span class="p">:</span>
+<span class="nl">switchD_0010137b_caseD_2:</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">out</span> <span class="o">==</span> <span class="p">(</span><span class="n">exitc</span> <span class="o">*</span><span class="p">)</span><span class="mh">0x0</span><span class="p">)</span> <span class="p">{</span>
+      <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="o">*</span><span class="p">(</span><span class="n">undefined</span> <span class="o">*</span><span class="p">)</span><span class="n">out</span> <span class="o">=</span> <span class="mi">1</span><span class="p">;</span>
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="p">}</span>
+  <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>We can dissasemble it like:</p>
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">case</span> <span class="mi">0</span><span class="p">:</span> <span class="n">NOP</span>
+<span class="k">case</span> <span class="mi">1</span><span class="p">:</span> <span class="n">POP</span> <span class="p">(</span><span class="n">EXIT</span><span class="p">)</span>
+<span class="k">case</span> <span class="mh">0x10</span><span class="p">:</span> <span class="n">DUP</span>
+<span class="k">case</span> <span class="mh">0x11</span><span class="p">:</span> <span class="n">POP</span>
+<span class="k">case</span> <span class="mh">0x12</span><span class="p">:</span> <span class="n">ADD</span> <span class="p">(</span><span class="n">from</span> <span class="n">stack</span><span class="p">)</span>
+<span class="k">case</span> <span class="mh">0x13</span><span class="p">:</span> <span class="n">SUB</span> <span class="p">(</span><span class="n">from</span> <span class="n">stack</span><span class="p">)</span>
+<span class="k">case</span> <span class="mh">0x14</span><span class="p">:</span> <span class="n">SWP</span> <span class="p">(</span><span class="n">from</span> <span class="n">stack</span><span class="p">)</span>
+<span class="k">case</span> <span class="mh">0x20</span><span class="p">:</span> <span class="n">TO_ALT_STACK</span> <span class="p">(</span><span class="n">pop</span> <span class="n">value</span> <span class="n">and</span> <span class="n">push</span> <span class="n">on</span> <span class="n">alt</span><span class="p">)</span>
+<span class="k">case</span> <span class="mh">0x21</span><span class="p">:</span> <span class="n">FROM_ALT</span>
+<span class="k">case</span> <span class="mh">0x30</span><span class="p">:</span> <span class="n">POP_JMP</span>
+<span class="k">case</span> <span class="mh">0x31</span><span class="p">:</span> <span class="n">JMP_IF_ZERO</span>
+<span class="k">case</span> <span class="mh">0x32</span><span class="p">:</span> <span class="n">JMP_IF_NOT_ZERO</span>
+<span class="k">case</span> <span class="mh">0x33</span><span class="p">:</span> <span class="n">JMP_BELOW_ZERO</span>
+<span class="k">case</span> <span class="mh">0x34</span><span class="p">:</span> <span class="n">JMP_BELOW_ONE</span>
+<span class="k">case</span> <span class="mh">0xc0</span><span class="p">:</span> <span class="n">GET_STDIN</span>
+<span class="k">case</span> <span class="mh">0x80</span><span class="p">:</span> <span class="n">PUSH1</span>
+<span class="k">case</span> <span class="mh">0x81</span><span class="p">:</span> <span class="n">PUSH2</span>
+<span class="k">case</span> <span class="mh">0xc1</span><span class="p">:</span> <span class="n">PUT_CHAR</span>
+
+</code></pre></div></div>
+
+<p>From this we can create a python script to simulate the program at runtime:</p>
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code>
+<span class="n">code</span> <span class="o">=</span> <span class="sh">'</span><span class="s">81 75 00 80 00 80 0a 80 3f 80 65 80 76 80 69 80 6c 80 61 80 20 80 74 80 75 80 6f 80 20 80 74 80 69 80 20 80 65 80 6b 80 61 80 6d 80 20 80 75 80 6f 80 79 80 20 80 6e 80 61 80 43 80 0a 80 58 80 20 80 49 80 20 80 52 80 20 80 54 80 20 80 41 80 20 80 4d 80 20 80 65 80 68 80 74 80 20 80 6f 80 74 80 20 80 65 80 6d 80 6f 80 63 80 6c 80 65 80 57 81 3b 01 30 80 01 80 01 80 00 c0 10 80 75 13 81 a0 00 31 10 80 64 13 81 aa 00 31 10 80 6c 13 81 b4 00 31 10 80 72 13 81 c0 00 31 81 fb 00 30 11 20 80 01 13 21 81 cc 00 30 11 20 80 01 12 21 81 cc 00 30 11 20 20 80 01 13 21 21 81 cc 00 30 11 20 20 80 01 12 21 21 81 cc 00 30 20 20 81 da 00 21 10 20 80 10 81 47 01 30 14 10 20 12 21 14 21 14 21 14 20 81 ef 00 21 80 02 81 61 01 30 81 7b 00 14 81 74 01 12 30 80 00 01 81 38 01 80 00 80 0a 80 2e 80 65 80 75 80 72 80 67 80 20 80 61 80 20 80 79 80 62 80 20 80 6e 80 65 80 74 80 61 80 65 80 20 80 65 80 72 80 65 80 77 80 20 80 75 80 6f 80 59 81 3b 01 30 80 01 01 10 81 45 01 31 c1 81 3b 01 30 11 30 80 00 20 20 10 81 5b 01 31 80 01 13 21 10 21 12 81 49 01 30 11 21 11 21 14 30 10 81 71 01 31 80 01 13 20 10 12 21 81 61 01 30 11 14 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 30 00 00 00 30 00 00 00 30 00 00 00 30 00 00 00 30 00 00 00 81 7f 05 30 81 fb 00 30 30 00 00 00 81 fb 00 30 81 7f 05 30 30 00 00 00 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 74 05 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 30 00 00 00 81 fb 00 30 81 fb 00 30 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 81 fb 00 30 30 00 00 00 30 00 00 00 30 00 00 00 30 00 00 00 30 00 00 00 30 00 00 00 30 00 00 00 30 00 00 00 30 00 00 00 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 81 fb 00 30 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 81 74 05 30 30 00 00 00 81 fb 00 30 81 fb 00 30 30 00 00 00 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 81 7f 05 30 30 00 00 00 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 81 fb 00 30 30 00 00 00 81 fb 00 30 81 fb 00 30 30 00 00 00 81 fb 00 30 81 fb 00 30 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 30 00 00 00 30 00 00 00 30 00 00 00 30 00 00 00 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 30 00 00 00 30 00 00 00 30 00 00 00 30 00 00 00 30 00 00 00 30 00 00 00 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 81 fb 00 30 30 00 00 00 81 fb 00 30 81 fb 00 30 81 fb 00 30 30 00 00 00 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 81 fb 00 30 30 00 00 00 30 00 00 00 30 00 00 00 81 fb 00 30 30 00 00 00 30 00 00 00 81 74 05 30 30 00 00 00 30 00 00 00 81 fb 00 30 30 00 00 00 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 81 fb 00 30 30 00 00 00 81 fb 00 30 81 fb 00 30 81 fb 00 30 30 00 00 00 30 00 00 00 81 fb 00 30 30 00 00 00 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 30 00 00 00 81 fb 00 30 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 30 00 00 00 30 00 00 00 81 fb 00 30 81 fb 00 30 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 81 fb 00 30 81 74 05 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 30 00 00 00 81 fb 00 30 30 00 00 00 30 00 00 00 30 00 00 00 30 00 00 00 81 fb 00 30 30 00 00 00 30 00 00 00 81 74 05 30 30 00 00 00 81 fb 00 30 30 00 00 00 30 00 00 00 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 fb 00 30 81 85 05 30 81 fb 00 30 20 10 81 fb 00 31 80 01 13 21 30 20 80 01 12 21 30 11 11 11 11 81 ce 05 80 00 80 0a 80 21 80 74 80 69 80 20 80 65 80 64 80 61 80 6d 80 20 80 75 80 6f 80 79 80 20 80 2c 80 73 80 6e 80 6f 80 69 80 74 80 61 80 6c 80 75 80 74 80 61 80 72 80 67 80 6e 80 6f 80 43 81 3b 01 30 81 f8 00 30</span><span class="sh">'</span>
+
+<span class="n">code</span> <span class="o">=</span> <span class="n">code</span><span class="p">.</span><span class="nf">split</span><span class="p">(</span><span class="sh">"</span><span class="s"> </span><span class="sh">"</span><span class="p">)</span>
+
+<span class="k">class</span> <span class="nc">Stack</span><span class="p">:</span>
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="n">self</span><span class="p">):</span>
+        <span class="n">self</span><span class="p">.</span><span class="n">stack</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">def</span> <span class="nf">push</span><span class="p">(</span><span class="n">self</span><span class="p">,</span> <span class="n">val</span><span class="p">):</span>
+        <span class="n">self</span><span class="p">.</span><span class="n">stack</span><span class="p">.</span><span class="nf">append</span><span class="p">(</span><span class="n">val</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">pop</span><span class="p">(</span><span class="n">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">self</span><span class="p">.</span><span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+
+<span class="n">stack</span> <span class="o">=</span> <span class="nc">Stack</span><span class="p">()</span>
+<span class="n">alt_stack</span> <span class="o">=</span> <span class="nc">Stack</span><span class="p">()</span>
+
+
+<span class="n">ops</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="sh">"</span><span class="s">00</span><span class="sh">"</span><span class="p">:</span> <span class="p">[</span><span class="sh">"</span><span class="s">NOP</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">No operation</span><span class="sh">"</span><span class="p">],</span>
+    <span class="sh">"</span><span class="s">01</span><span class="sh">"</span><span class="p">:</span> <span class="p">[</span><span class="sh">"</span><span class="s">EXT</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">Set exit code and exit</span><span class="sh">"</span><span class="p">],</span>
+    <span class="sh">"</span><span class="s">10</span><span class="sh">"</span><span class="p">:</span> <span class="p">[</span><span class="sh">"</span><span class="s">DUP</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">Duplicate</span><span class="sh">"</span><span class="p">],</span>
+    <span class="sh">"</span><span class="s">11</span><span class="sh">"</span><span class="p">:</span> <span class="p">[</span><span class="sh">"</span><span class="s">POP</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">Pop off stack</span><span class="sh">"</span><span class="p">],</span>
+    <span class="sh">"</span><span class="s">12</span><span class="sh">"</span><span class="p">:</span> <span class="p">[</span><span class="sh">"</span><span class="s">ADD</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">add</span><span class="sh">"</span><span class="p">],</span>
+    <span class="sh">"</span><span class="s">13</span><span class="sh">"</span><span class="p">:</span> <span class="p">[</span><span class="sh">"</span><span class="s">SUB</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">subtract</span><span class="sh">"</span><span class="p">],</span>
+    <span class="sh">"</span><span class="s">14</span><span class="sh">"</span><span class="p">:</span> <span class="p">[</span><span class="sh">"</span><span class="s">SWP</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">swap</span><span class="sh">"</span><span class="p">],</span>
+    <span class="sh">"</span><span class="s">20</span><span class="sh">"</span><span class="p">:</span> <span class="p">[</span><span class="sh">"</span><span class="s">TAL</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">to other stack (to alt)</span><span class="sh">"</span><span class="p">],</span>
+    <span class="sh">"</span><span class="s">21</span><span class="sh">"</span><span class="p">:</span> <span class="p">[</span><span class="sh">"</span><span class="s">FAL</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">from other stack (from alt)</span><span class="sh">"</span><span class="p">],</span>
+    <span class="sh">"</span><span class="s">30</span><span class="sh">"</span><span class="p">:</span> <span class="p">[</span><span class="sh">"</span><span class="s">JMP</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">jump to value and pop off stack</span><span class="sh">"</span><span class="p">],</span>
+    <span class="sh">"</span><span class="s">31</span><span class="sh">"</span><span class="p">:</span> <span class="p">[</span><span class="sh">"</span><span class="s">JIZ</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">jump if zero</span><span class="sh">"</span><span class="p">],</span>
+    <span class="sh">"</span><span class="s">32</span><span class="sh">"</span><span class="p">:</span> <span class="p">[</span><span class="sh">"</span><span class="s">JIN</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">jump if not zero</span><span class="sh">"</span><span class="p">],</span>
+    <span class="sh">"</span><span class="s">33</span><span class="sh">"</span><span class="p">:</span> <span class="p">[</span><span class="sh">"</span><span class="s">JIL</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">jump if less than zero</span><span class="sh">"</span><span class="p">],</span>
+    <span class="sh">"</span><span class="s">34</span><span class="sh">"</span><span class="p">:</span> <span class="p">[</span><span class="sh">"</span><span class="s">JIO</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">jump if less than one</span><span class="sh">"</span><span class="p">],</span>
+    <span class="sh">"</span><span class="s">80</span><span class="sh">"</span><span class="p">:</span> <span class="p">[</span><span class="sh">"</span><span class="s">GOB</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">get a byte from code and put it on stack</span><span class="sh">"</span><span class="p">],</span>
+    <span class="sh">"</span><span class="s">81</span><span class="sh">"</span><span class="p">:</span> <span class="p">[</span><span class="sh">"</span><span class="s">GTB</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">get 2 bytes from code and put them on stack</span><span class="sh">"</span><span class="p">],</span>
+    <span class="sh">"</span><span class="s">c1</span><span class="sh">"</span><span class="p">:</span> <span class="p">[</span><span class="sh">"</span><span class="s">OUT</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">pops a value and prints it</span><span class="sh">"</span><span class="p">],</span>
+    <span class="sh">"</span><span class="s">c0</span><span class="sh">"</span><span class="p">:</span> <span class="p">[</span><span class="sh">"</span><span class="s">INP</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">inputs a character and puts it on the stack</span><span class="sh">"</span><span class="p">]</span>
+<span class="p">}</span>
+
+<span class="n">output</span> <span class="o">=</span> <span class="sh">""</span>
+
+<span class="n">ct</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="k">while</span> <span class="n">ct</span> <span class="o">&lt;</span> <span class="nf">len</span><span class="p">(</span><span class="n">code</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">]</span> <span class="ow">in</span> <span class="n">ops</span><span class="p">.</span><span class="nf">keys</span><span class="p">():</span>
+        <span class="nf">print</span><span class="p">(</span><span class="sa">f</span><span class="sh">"</span><span class="si">{</span><span class="n">ct</span><span class="si">:</span><span class="mi">03</span><span class="n">x</span><span class="si">}</span><span class="sh">"</span><span class="p">,</span> <span class="n">ops</span><span class="p">[</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">]][</span><span class="mi">0</span><span class="p">],</span> <span class="n">end</span><span class="o">=</span> <span class="sh">"</span><span class="s"> </span><span class="sh">"</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">ops</span><span class="p">[</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">]][</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sh">"</span><span class="s">GOB</span><span class="sh">"</span><span class="p">:</span>
+            <span class="n">ct</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="n">stack</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="sh">"</span><span class="s">00</span><span class="sh">"</span> <span class="o">+</span> <span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">])</span>
+            <span class="nf">print</span><span class="p">(</span><span class="sh">"</span><span class="s">00</span><span class="sh">"</span> <span class="o">+</span> <span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">])</span>
+        <span class="k">elif</span> <span class="n">ops</span><span class="p">[</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">]][</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sh">"</span><span class="s">GTB</span><span class="sh">"</span><span class="p">:</span>
+            <span class="n">r</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="n">ct</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="n">r</span><span class="p">.</span><span class="nf">append</span><span class="p">(</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">])</span>
+            <span class="n">ct</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="n">r</span><span class="p">.</span><span class="nf">append</span><span class="p">(</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">])</span>
+            <span class="n">stack</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="sh">""</span><span class="p">.</span><span class="nf">join</span><span class="p">(</span><span class="nf">reversed</span><span class="p">(</span><span class="n">r</span><span class="p">)))</span>
+            <span class="nf">print</span><span class="p">(</span><span class="sh">""</span><span class="p">.</span><span class="nf">join</span><span class="p">(</span><span class="nf">reversed</span><span class="p">(</span><span class="n">r</span><span class="p">)))</span>
+        <span class="k">elif</span> <span class="n">ops</span><span class="p">[</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">]][</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sh">"</span><span class="s">EXT</span><span class="sh">"</span><span class="p">:</span>
+            <span class="nf">print</span><span class="p">(</span><span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">())</span>
+            <span class="k">break</span>
+        <span class="k">elif</span> <span class="n">ops</span><span class="p">[</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">]][</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sh">"</span><span class="s">DUP</span><span class="sh">"</span><span class="p">:</span>
+            <span class="n">r</span> <span class="o">=</span> <span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+            <span class="n">stack</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+            <span class="n">stack</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+            <span class="nf">print</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">ops</span><span class="p">[</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">]][</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sh">"</span><span class="s">POP</span><span class="sh">"</span><span class="p">:</span>
+            <span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+            <span class="nf">print</span><span class="p">()</span>
+        <span class="k">elif</span> <span class="n">ops</span><span class="p">[</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">]][</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sh">"</span><span class="s">ADD</span><span class="sh">"</span><span class="p">:</span>
+            <span class="n">a</span> <span class="o">=</span> <span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+            <span class="n">b</span> <span class="o">=</span> <span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+            <span class="nf">print</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="sh">"</span><span class="s">,</span><span class="sh">"</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nf">hex</span><span class="p">(</span><span class="nf">int</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="mi">16</span><span class="p">)</span> <span class="o">+</span> <span class="nf">int</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="mi">16</span><span class="p">)).</span><span class="nf">startswith</span><span class="p">(</span><span class="sh">"</span><span class="s">-0x</span><span class="sh">"</span><span class="p">):</span>
+                <span class="n">stack</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="sh">"</span><span class="s">-</span><span class="sh">"</span> <span class="o">+</span> <span class="nf">hex</span><span class="p">(</span><span class="nf">int</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="mi">16</span><span class="p">)</span> <span class="o">+</span> <span class="nf">int</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="mi">16</span><span class="p">))[</span><span class="mi">3</span><span class="p">:])</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">stack</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="nf">hex</span><span class="p">(</span><span class="nf">int</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="mi">16</span><span class="p">)</span> <span class="o">+</span> <span class="nf">int</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="mi">16</span><span class="p">))[</span><span class="mi">2</span><span class="p">:])</span>
+        <span class="k">elif</span> <span class="n">ops</span><span class="p">[</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">]][</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sh">"</span><span class="s">SUB</span><span class="sh">"</span><span class="p">:</span>
+            <span class="n">a</span> <span class="o">=</span> <span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+            <span class="n">b</span> <span class="o">=</span> <span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+            <span class="nf">print</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="sh">"</span><span class="s">,</span><span class="sh">"</span><span class="p">,</span> <span class="n">a</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nf">hex</span><span class="p">(</span><span class="nf">int</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="mi">16</span><span class="p">)</span> <span class="o">-</span> <span class="nf">int</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="mi">16</span><span class="p">)).</span><span class="nf">startswith</span><span class="p">(</span><span class="sh">"</span><span class="s">-0x</span><span class="sh">"</span><span class="p">):</span>
+                <span class="n">stack</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="sh">"</span><span class="s">-</span><span class="sh">"</span> <span class="o">+</span> <span class="nf">hex</span><span class="p">(</span><span class="nf">int</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="mi">16</span><span class="p">)</span> <span class="o">-</span> <span class="nf">int</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="mi">16</span><span class="p">))[</span><span class="mi">3</span><span class="p">:])</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">stack</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="nf">hex</span><span class="p">(</span><span class="nf">int</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="mi">16</span><span class="p">)</span> <span class="o">-</span> <span class="nf">int</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="mi">16</span><span class="p">))[</span><span class="mi">2</span><span class="p">:])</span>
+        <span class="k">elif</span> <span class="n">ops</span><span class="p">[</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">]][</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sh">"</span><span class="s">SWP</span><span class="sh">"</span><span class="p">:</span>
+            <span class="n">a</span> <span class="o">=</span> <span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+            <span class="n">b</span> <span class="o">=</span> <span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+            <span class="nf">print</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="sh">"</span><span class="s">,</span><span class="sh">"</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span>
+            <span class="n">stack</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="n">a</span><span class="p">)</span>
+            <span class="n">stack</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="n">b</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">ops</span><span class="p">[</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">]][</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sh">"</span><span class="s">TAL</span><span class="sh">"</span><span class="p">:</span>
+            <span class="n">r</span> <span class="o">=</span> <span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+            <span class="n">alt_stack</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+            <span class="nf">print</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">ops</span><span class="p">[</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">]][</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sh">"</span><span class="s">FAL</span><span class="sh">"</span><span class="p">:</span>
+            <span class="n">r</span> <span class="o">=</span> <span class="n">alt_stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+            <span class="n">stack</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+            <span class="nf">print</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">ops</span><span class="p">[</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">]][</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sh">"</span><span class="s">JMP</span><span class="sh">"</span><span class="p">:</span>
+            <span class="n">ct</span> <span class="o">=</span> <span class="nf">int</span><span class="p">(</span><span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">(),</span> <span class="mi">16</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+            <span class="nf">print</span><span class="p">(</span><span class="sa">f</span><span class="sh">"</span><span class="si">{</span><span class="n">ct</span><span class="o">+</span><span class="mi">1</span><span class="si">:</span><span class="mi">03</span><span class="n">x</span><span class="si">}</span><span class="sh">"</span><span class="p">)</span>
+            <span class="c1"># print()
+</span>        <span class="k">elif</span> <span class="n">ops</span><span class="p">[</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">]][</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sh">"</span><span class="s">JIZ</span><span class="sh">"</span><span class="p">:</span>
+            <span class="n">jump</span> <span class="o">=</span> <span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+            <span class="n">check</span> <span class="o">=</span> <span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+            <span class="nf">if </span><span class="p">(</span><span class="nf">int</span><span class="p">(</span><span class="n">check</span><span class="p">,</span> <span class="mi">16</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">):</span>
+                <span class="n">ct</span> <span class="o">=</span> <span class="nf">int</span><span class="p">(</span><span class="n">jump</span><span class="p">,</span> <span class="mi">16</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+                <span class="k">pass</span>
+            <span class="nf">print</span><span class="p">(</span><span class="sa">f</span><span class="sh">"</span><span class="si">{</span><span class="n">ct</span><span class="o">+</span><span class="mi">1</span><span class="si">:</span><span class="mi">03</span><span class="n">x</span><span class="si">}</span><span class="sh">"</span><span class="p">)</span>
+            <span class="c1"># print()
+</span>        <span class="k">elif</span> <span class="n">ops</span><span class="p">[</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">]][</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sh">"</span><span class="s">JIN</span><span class="sh">"</span><span class="p">:</span>
+            <span class="n">jump</span> <span class="o">=</span> <span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+            <span class="n">check</span> <span class="o">=</span> <span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+            <span class="nf">if </span><span class="p">(</span><span class="nf">int</span><span class="p">(</span><span class="n">check</span><span class="p">,</span> <span class="mi">16</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">):</span>
+                <span class="n">ct</span> <span class="o">=</span> <span class="nf">int</span><span class="p">(</span><span class="n">jump</span><span class="p">,</span> <span class="mi">16</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+                <span class="k">pass</span>
+            <span class="nf">print</span><span class="p">(</span><span class="sa">f</span><span class="sh">"</span><span class="si">{</span><span class="n">ct</span><span class="o">+</span><span class="mi">1</span><span class="si">:</span><span class="mi">03</span><span class="n">x</span><span class="si">}</span><span class="sh">"</span><span class="p">)</span>
+            <span class="c1"># print()
+</span>        <span class="k">elif</span> <span class="n">ops</span><span class="p">[</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">]][</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sh">"</span><span class="s">JIL</span><span class="sh">"</span><span class="p">:</span>
+            <span class="n">jump</span> <span class="o">=</span> <span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+            <span class="n">check</span> <span class="o">=</span> <span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+            <span class="nf">if </span><span class="p">(</span><span class="nf">int</span><span class="p">(</span><span class="n">check</span><span class="p">,</span> <span class="mi">16</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">):</span>
+                <span class="n">ct</span> <span class="o">=</span> <span class="nf">int</span><span class="p">(</span><span class="n">jump</span><span class="p">,</span> <span class="mi">16</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+                <span class="k">pass</span>
+            <span class="nf">print</span><span class="p">(</span><span class="sa">f</span><span class="sh">"</span><span class="si">{</span><span class="n">ct</span><span class="o">+</span><span class="mi">1</span><span class="si">:</span><span class="mi">03</span><span class="n">x</span><span class="si">}</span><span class="sh">"</span><span class="p">)</span>
+            <span class="c1"># print()
+</span>        <span class="k">elif</span> <span class="n">ops</span><span class="p">[</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">]][</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sh">"</span><span class="s">JIO</span><span class="sh">"</span><span class="p">:</span>
+            <span class="n">jump</span> <span class="o">=</span> <span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+            <span class="n">check</span> <span class="o">=</span> <span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+            <span class="nf">if </span><span class="p">(</span><span class="nf">int</span><span class="p">(</span><span class="n">check</span><span class="p">,</span> <span class="mi">16</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">1</span><span class="p">):</span>
+                <span class="n">ct</span> <span class="o">=</span> <span class="nf">int</span><span class="p">(</span><span class="n">jump</span><span class="p">,</span> <span class="mi">16</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+                <span class="k">pass</span>
+            <span class="nf">print</span><span class="p">(</span><span class="sa">f</span><span class="sh">"</span><span class="si">{</span><span class="n">ct</span><span class="o">+</span><span class="mi">1</span><span class="si">:</span><span class="mi">03</span><span class="n">x</span><span class="si">}</span><span class="sh">"</span><span class="p">)</span>
+            <span class="c1"># print()
+</span>        <span class="k">elif</span> <span class="n">ops</span><span class="p">[</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">]][</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sh">"</span><span class="s">OUT</span><span class="sh">"</span><span class="p">:</span>
+            <span class="n">out</span> <span class="o">=</span> <span class="n">stack</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+            <span class="nf">print</span><span class="p">(</span><span class="nf">chr</span><span class="p">(</span><span class="nf">int</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="mi">16</span><span class="p">)))</span>
+            <span class="n">output</span> <span class="o">+=</span> <span class="nf">chr</span><span class="p">(</span><span class="nf">int</span><span class="p">(</span><span class="n">out</span><span class="p">,</span> <span class="mi">16</span><span class="p">))</span>
+        <span class="k">elif</span> <span class="n">ops</span><span class="p">[</span><span class="n">code</span><span class="p">[</span><span class="n">ct</span><span class="p">]][</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sh">"</span><span class="s">INP</span><span class="sh">"</span><span class="p">:</span>
+            <span class="n">stack</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="nf">hex</span><span class="p">(</span><span class="nf">ord</span><span class="p">(</span><span class="nf">input</span><span class="p">()))[</span><span class="mi">2</span><span class="p">:])</span>
+
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nf">print</span><span class="p">()</span>
+        <span class="nf">print</span><span class="p">(</span><span class="n">stack</span><span class="p">.</span><span class="n">stack</span><span class="p">)</span>
+    <span class="n">ct</span> <span class="o">+=</span> <span class="mi">1</span>
+<span class="nf">print</span><span class="p">(</span><span class="n">output</span><span class="p">)</span>
+
+</code></pre></div></div>
+
+<hr />
+<p>Now comes the harder part…</p>
+
+<p>With dynamic analysis from out written disassembler, we can assume that program checks our input against four letters and jmp based on that</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>07b INP a  
+['0001', '0001', '0000', '61']  
+07c DUP 61  
+['0001', '0001', '0000', '61', '61']  
+07d GOB 0075  
+['0001', '0001', '0000', '61', '61', '0075']  
+07f SUB 61 , 0075  
+['0001', '0001', '0000', '61', '-14']  
+080 GTB 00a0  
+['0001', '0001', '0000', '61', '-14', '00a0']  
+083 JIZ 084  
+['0001', '0001', '0000', '61']  
+084 DUP 61  
+['0001', '0001', '0000', '61', '61']  
+085 GOB 0064  
+['0001', '0001', '0000', '61', '61', '0064']  
+087 SUB 61 , 0064  
+['0001', '0001', '0000', '61', '-3']  
+088 GTB 00aa  
+['0001', '0001', '0000', '61', '-3', '00aa']  
+08b JIZ 08c  
+['0001', '0001', '0000', '61']  
+08c DUP 61  
+['0001', '0001', '0000', '61', '61']  
+08d GOB 006c  
+['0001', '0001', '0000', '61', '61', '006c']  
+08f SUB 61 , 006c  
+['0001', '0001', '0000', '61', '-b']  
+090 GTB 00b4  
+['0001', '0001', '0000', '61', '-b', '00b4']  
+093 JIZ 094  
+['0001', '0001', '0000', '61']  
+094 DUP 61  
+['0001', '0001', '0000', '61', '61']  
+095 GOB 0072  
+['0001', '0001', '0000', '61', '61', '0072']  
+097 SUB 61 , 0072  
+['0001', '0001', '0000', '61', '-11']  
+098 GTB 00c0  
+['0001', '0001', '0000', '61', '-11', '00c0']  
+09b JIZ 09c  
+['0001', '0001', '0000', '61']
+</code></pre></div></div>
+
+<p>If we don’t enter any of these four characters(r,l,u,d) the program will exit.</p>
+
+<p>The <code class="language-plaintext highlighter-rouge">r l u d</code> characters imply that we may be dealing with some 2d game
+based on <code class="language-plaintext highlighter-rouge">r = right, l = left, u = up, d = down</code></p>
+
+<p>I tried looking at a code and try to understand it but I ended up with nothing, cuz the custom VM is based entirely on stack so it was really hard for me to understand.</p>
+
+<p>Therefore I tried different approach with dynamic analysis:</p>
+
+<p>I found out that the program stores our position onto a stack:</p>
+
+<p>first input <code class="language-plaintext highlighter-rouge">r</code>:</p>
+
+<p><img src="/assets/images/Pasted%20image%2020240209162342.png" alt="stack value r" /></p>
+
+<p>first input <code class="language-plaintext highlighter-rouge">l</code>:</p>
+
+<p><img src="/assets/images/Pasted image 20240209162502.png" alt="stack-values-l" /></p>
+
+<p>Another finding was that:</p>
+
+<p>If we enter the right input the program prompts user asking for another character.</p>
+
+<p>If we enter the wrong one the program just exits.</p>
+
+<p>Therefore I tried to compare these two situations.
+Using online string compare tool I found that the program runs basically the same most of the time for both cases(right/wrong) up until a certain point.</p>
+
+<p><img src="/assets/images/Pasted image 20240209162557.png" alt="string-compare" /></p>
+
+<p>Looking back on how program calculated these jump values, we found out it calculates them from current position:
+<code class="language-plaintext highlighter-rouge">VALUE = JMP_OFF + (0x10*y+x)*4</code></p>
+
+<p>JMP_OFF is always <code class="language-plaintext highlighter-rouge">0x174</code></p>
+
+<p>Therefore I dumped all bytes from <code class="language-plaintext highlighter-rouge">0x174</code> till the end:</p>
+
+<p><img src="/assets/images/Pasted image 20240209165045.png" alt="dump" /></p>
+
+<p>Here we see bunch of reapeting sequences so lets substitute them. We can find from the analysis that <code class="language-plaintext highlighter-rouge">81fb0030</code> are bytes that lead to exit.</p>
+
+<p>so lets substitute and split to lines by <code class="language-plaintext highlighter-rouge">0x40</code> bytes (based on calculation of value):</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>81fb0030 = #
+30000000 = _
+</code></pre></div></div>
+<p>there are still some sequences which doesn’t exit the program, but we don’t know what they actually do:</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>817f0530 = ?
+81740530 = !
+</code></pre></div></div>
+
+<p><img src="/assets/images/Pasted image 20240209165751.png" alt="maze1" /></p>
+
+<p>It looks like a maze so lets try to solve it:</p>
+
+<p>(We start at 1,1)</p>
+
+<p>If we take <code class="language-plaintext highlighter-rouge">rrrd</code> the program exits on reaching <code class="language-plaintext highlighter-rouge">!</code> cell, even though this is the only place from which we can exit the first “cell” 
+We can take the <code class="language-plaintext highlighter-rouge">rrrrrlld</code> route and the program doesn’t exit, implying that we must visit the <code class="language-plaintext highlighter-rouge">?</code> cell before visiting <code class="language-plaintext highlighter-rouge">!</code></p>
+
+<p>So what happened?
+By analysis we can see the program tracks three values:</p>
+
+<p><img src="/assets/images/Pasted image 20240209170039.png" alt="health-on-stack" /></p>
+
+<p>We know first two are (x, y) coordinates, but what is the third one?</p>
+
+<p>Upon visiting <code class="language-plaintext highlighter-rouge">?</code> cell it increases by one on each visit and upon visiting <code class="language-plaintext highlighter-rouge">!</code> cell it decreases by one… We can surely assume this is some kind of health.</p>
+
+<p>Lets rename to something more readable like <code class="language-plaintext highlighter-rouge">? = +</code> and <code class="language-plaintext highlighter-rouge">! = -</code></p>
+
+<p><img src="/assets/images/Pasted image 20240209170355.png" alt="maze2" /></p>
+
+<p>And we can try to solve now, by stacking health on the first + and then walking through the maze. Aaand voilà we get the flag.</p>
+
+</div><footer class="flex flex-col centered mb-3 grey3 text-m mt-12">
+  <div class="flex align-center ">
+    <span>Github</span>
+    <hr class="no-margin dotted-hor ml-1">
+    <a  class="ml-1 grey2 underline hover:text-black transition-colors" href="https://github.com/MatusMandzak">@MatusMandzak</a>
+  </div>
+  <div class="flex align-center ">
+    <span>Email</span>
+    <hr class="no-margin dotted-hor ml-1">
+    <a  class="ml-1 grey2 underline hover:text-black transition-colors" href="mailto:mandzi.matus@gmail.com">mandzi.matus@gmail.com</a>
+  </div>
+</footer></div>
+  </body>
+</html>
