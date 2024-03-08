@@ -8,13 +8,15 @@ code {
   background-color: #e0e0e0;
 }
 
-img {
-  max-width: 100%;
-}
-
 .highlight {
   padding: 1rem;
   background-color: #e0e0e0;
+}
+
+img {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  max-width: 100%;
 }
 
 pre {
