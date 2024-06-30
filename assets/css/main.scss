@@ -2,6 +2,9 @@
 ---
 @charset "utf-8";
 @import "base";
+@import url('https://fonts.googleapis.com/css?family=Press+Start+2P|Quantico|Ubuntu+Mono');
+
+$ubuntu_mono: 'Ubuntu Mono', monospace;
 
 * {
     box-sizing: border-box;
@@ -15,10 +18,10 @@
 body {
 
     margin: 0;
-    color: rgb(64,64,64);
     padding-top: 8rem;
     padding-bottom: 8rem;
     line-height: 1.5;
+    font: 14px/1.5 $ubuntu_mono, "Noto Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
 
@@ -77,6 +80,9 @@ a {
     margin-bottom: 3rem;
 }
 
+.mt-2 {
+    margin-top: .5rem;
+}
 .mt-3 {
     margin-top: .75rem;
 }
@@ -107,6 +113,14 @@ a {
     color: rgb(0,0,0);
 }
 
+.grey5{
+    color: rgb(200,200,200);
+}
+
+.grey4{
+    color: rgb(160,160,160);
+}
+
 .grey3{
     color: rgb(130,130,130);
 }
@@ -120,6 +134,29 @@ a {
 
 }
 
+.red{
+    color: $colorRed;
+}
+
+.orange{
+    color: $colorOrange;
+}
+
+.yellow{
+    color: $colorYellow;
+}
+
+.aqua{
+    color: $colorAqua;
+}
+
+.blue{
+    color: $colorBlue;
+}
+
+.darkblue{
+    color: $colorDarkblue;
+}
 .text-xs {
     font-size: 0.9rem;
     line-height: 1.5rem;  
@@ -148,6 +185,10 @@ a {
     font-size: 1.5rem;
     line-height: 1.75rem;
 }
+.text-xxxl {
+    font-size: 2.0rem;
+    line-height: 1.75rem;
+}
 
 .font-light {
     font-weight: 300;
@@ -171,12 +212,12 @@ a {
     transition-timing-function: cubic-bezier(.4,0,.2,1);
     transition-duration: .3s;
 }
-.hover\:text-black:hover {
-    color: rgb(0,0,0);
+.hover\:text-red:hover {
+    color: $colorRed;
 }
 
 .hover\:bg-beige:hover {
-    background: #c6c6c6;
+    background: $colorBlue;
 }
 
 $sol-base03:   #002b36;  // 15 -12 -12

@@ -1,6 +1,7 @@
+@import url("https://fonts.googleapis.com/css?family=Press+Start+2P|Quantico|Ubuntu+Mono");
 body {
-  background: #e6e6e6;
-  color: #000000;
+  background: #264653;
+  color: #e6e6e6;
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", Segoe UI Symbol, "Noto Color Emoji";
 }
 
@@ -13,10 +14,10 @@ body {
 
 body {
   margin: 0;
-  color: rgb(64, 64, 64);
   padding-top: 8rem;
   padding-bottom: 8rem;
   line-height: 1.5;
+  font: 14px/1.5 "Ubuntu Mono", monospace, "Noto Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
 a {
@@ -74,6 +75,10 @@ a {
   margin-bottom: 3rem;
 }
 
+.mt-2 {
+  margin-top: 0.5rem;
+}
+
 .mt-3 {
   margin-top: 0.75rem;
 }
@@ -103,6 +108,14 @@ a {
   color: rgb(0, 0, 0);
 }
 
+.grey5 {
+  color: rgb(200, 200, 200);
+}
+
+.grey4 {
+  color: rgb(160, 160, 160);
+}
+
 .grey3 {
   color: rgb(130, 130, 130);
 }
@@ -113,6 +126,30 @@ a {
 
 .grey1 {
   color: rgb(50, 50, 50);
+}
+
+.red {
+  color: #E76F51;
+}
+
+.orange {
+  color: #F4A261;
+}
+
+.yellow {
+  color: #E9C46A;
+}
+
+.aqua {
+  color: #2A9D8F;
+}
+
+.blue {
+  color: #486875;
+}
+
+.darkblue {
+  color: #264653;
 }
 
 .text-xs {
@@ -145,6 +182,11 @@ a {
   line-height: 1.75rem;
 }
 
+.text-xxxl {
+  font-size: 2rem;
+  line-height: 1.75rem;
+}
+
 .font-light {
   font-weight: 300;
 }
@@ -168,12 +210,12 @@ a {
   transition-duration: 0.3s;
 }
 
-.hover\:text-black:hover {
-  color: rgb(0, 0, 0);
+.hover\:text-red:hover {
+  color: #E76F51;
 }
 
 .hover\:bg-beige:hover {
-  background: #c6c6c6;
+  background: #486875;
 }
 
 .highlight .c {

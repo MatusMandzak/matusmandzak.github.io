@@ -1,17 +1,17 @@
 ---
 ---
-
+@import "base";
 p {
     line-height: 1.5;
     margin-top: 1rem;
     margin-bottom: 1rem;
 }
 code{
-    background-color: #e0e0e0;
+    background-color: $colorBlue;
 }
 .highlight {
     padding: 1rem;
-    background-color: #e0e0e0;
+    background-color: $colorBlue;
 }
 img{
     margin-top: 1rem;
