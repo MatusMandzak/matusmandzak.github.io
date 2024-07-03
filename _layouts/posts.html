@@ -6,7 +6,6 @@
     <title>{{ site.title }}</title>
     <link rel="stylesheet" href="{{ "/assets/css/main.css" | relative_url }}">
     <link rel="stylesheet" href="{{ "/assets/css/blog.css" | relative_url }}">
-    <link rel="stylesheet" href="{{ "/assets/css/languages.css" | relative_url }}">
   </head>
   <body>
     <div class="centered">
@@ -14,6 +13,6 @@
     <p class="centered font-light no-margin text-xl grey3  mb-12">  {{ page.subtitle }} </p>
     <div class="centered">{{ content }}</div>
       {%- include footer-off.html -%}
-  </div>
+    </div>
   </body>
 </html>

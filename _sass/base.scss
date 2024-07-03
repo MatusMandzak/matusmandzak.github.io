@@ -1,14 +1,19 @@
 $colorDarkblue: #264653;
-$colorBlue: #486875;
-$colorAqua: #2A9D8F;
+$colorBlue: #375764;
+$colorAqua  : #2A9D8F;
 $colorYellow: #E9C46A;
 $colorOrange: #F4A261;
 $colorRed: #E76F51;
 $bodyColor: #e6e6e6;
 $bodyFont: ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica Neue,Arial,Noto Sans,sans-serif,"Apple Color Emoji","Segoe UI Emoji",Segoe UI Symbol,"Noto Color Emoji";
 
+@import url('https://fonts.googleapis.com/css?family=Press+Start+2P|Quantico|Ubuntu+Mono');
+
+$ubuntu_mono: 'Ubuntu Mono', monospace;
+
 body {
   background: $colorDarkblue;
   color: $bodyColor;
   font-family: $bodyFont;
+  font-family: $ubuntu_mono, "Noto Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
 }

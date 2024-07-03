@@ -1,8 +1,10 @@
 @import url("https://fonts.googleapis.com/css?family=Press+Start+2P|Quantico|Ubuntu+Mono");
+@import url("https://fonts.googleapis.com/css?family=Press+Start+2P|Quantico|Ubuntu+Mono");
 body {
   background: #264653;
   color: #e6e6e6;
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", Segoe UI Symbol, "Noto Color Emoji";
+  font-family: "Ubuntu Mono", monospace, "Noto Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
 * {
@@ -17,7 +19,7 @@ body {
   padding-top: 8rem;
   padding-bottom: 8rem;
   line-height: 1.5;
-  font: 14px/1.5 "Ubuntu Mono", monospace, "Noto Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: "Ubuntu Mono", monospace, "Noto Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
 a {
@@ -145,7 +147,7 @@ a {
 }
 
 .blue {
-  color: #486875;
+  color: #375764;
 }
 
 .darkblue {
@@ -215,7 +217,7 @@ a {
 }
 
 .hover\:bg-beige:hover {
-  background: #486875;
+  background: #375764;
 }
 
 .highlight .c {

@@ -1,7 +1,9 @@
+@import url("https://fonts.googleapis.com/css?family=Press+Start+2P|Quantico|Ubuntu+Mono");
 body {
   background: #264653;
   color: #e6e6e6;
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", Segoe UI Symbol, "Noto Color Emoji";
+  font-family: "Ubuntu Mono", monospace, "Noto Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
 p {
@@ -11,12 +13,12 @@ p {
 }
 
 code {
-  background-color: #486875;
+  background-color: #375764;
 }
 
 .highlight {
   padding: 1rem;
-  background-color: #486875;
+  background-color: #375764;
 }
 
 img {
@@ -28,14 +30,6 @@ img {
 pre {
   overflow-x: auto;
   max-height: 70vh;
-}
-
-.centered {
-  margin-left: auto;
-  margin-right: auto;
-  max-width: 70%;
-  padding-left: 1rem;
-  padding-right: 1rem;
 }
 
 /*# sourceMappingURL=blog.css.map */
