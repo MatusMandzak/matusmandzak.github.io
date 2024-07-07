@@ -2,9 +2,7 @@
 ---
 @charset "utf-8";
 @import "base";
-@import url('https://fonts.googleapis.com/css?family=Press+Start+2P|Quantico|Ubuntu+Mono');
 
-$ubuntu_mono: 'Ubuntu Mono', monospace;
 
 * {
     box-sizing: border-box;
@@ -21,7 +19,7 @@ body {
     padding-top: 8rem;
     padding-bottom: 8rem;
     line-height: 1.5;
-    font-family: $ubuntu_mono, "Noto Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    
 }
 
 
@@ -70,7 +68,35 @@ a {
 }
 
 .ml-1{
+    margin-left: 0.25rem;
+}
+
+.ml-2{
+    margin-left: 0.5rem;
+}
+
+.ml-3{
+    margin-left: 0.75rem;
+}
+
+.ml-4{
     margin-left: 1rem;
+}
+
+.mr-1{
+    margin-right: 0.25rem;
+}
+
+.mr-2{
+    margin-right: 0.5rem;
+}
+
+.mr-3{
+    margin-right: 0.75rem;
+}
+
+.mr-4{
+    margin-right: 1rem;
 }
 
 .mb-3 {
