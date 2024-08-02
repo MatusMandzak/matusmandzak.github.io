@@ -6,10 +6,20 @@ body {
   font-family: "Ubuntu Mono", monospace, "Noto Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
+h1, h2, h3, h4, h5, h6 {
+  margin-bottom: 1rem;
+  margin-top: 1rem;
+}
+
 p {
   line-height: 1.5;
   margin-top: 1rem;
   margin-bottom: 1rem;
+}
+
+p a {
+  text-decoration: underline;
+  font-weight: bold;
 }
 
 code {

