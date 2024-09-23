@@ -8,9 +8,6 @@ body {
 
 * {
   box-sizing: border-box;
-  border-width: 0;
-  line-height: 1.5;
-  margin: 0;
 }
 
 body {
@@ -213,6 +210,14 @@ a {
 .text-xxxl {
   font-size: 2rem;
   line-height: 1.75rem;
+}
+
+.lh-175 {
+  line-height: 1.75rem;
+}
+
+.lh-2 {
+  line-height: 2rem;
 }
 
 .font-light {
