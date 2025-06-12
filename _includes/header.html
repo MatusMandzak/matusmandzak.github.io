@@ -7,7 +7,6 @@
       <a href="/" class="red">{{site.title}} <span class="yellow font-light">- {{ page.title }}</span></a>
     </h1>
     <nav class="flex yellow">
-      <a class="page-link transition-colors hover:text-red text-l" href="/assets/CV.pdf">CV</a>
       {%- for path in page_paths -%}
             {%- assign my_page = site.pages | where: "path", path | first -%}
             {%- if my_page.title -%}

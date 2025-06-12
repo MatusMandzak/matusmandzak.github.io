@@ -17,6 +17,10 @@ body {
   line-height: 1.5;
 }
 
+p {
+  text-align: justify;
+}
+
 a {
   color: inherit;
   text-decoration: inherit;
