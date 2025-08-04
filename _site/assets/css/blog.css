@@ -23,17 +23,17 @@ p a {
 }
 
 code {
-  background-color: #375764;
+  background-color: hsl(197, 29%, 20%);
 }
 
 .highlight {
   padding: 0.5rem;
-  background-color: #375764;
+  background-color: hsl(197, 29%, 20%);
 }
 
 .highlighter-rouge {
   padding: 0.2rem;
-  background-color: #375764;
+  background-color: hsl(197, 29%, 20%);
 }
 
 blockquote {

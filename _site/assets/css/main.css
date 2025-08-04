@@ -188,7 +188,7 @@ a {
 }
 
 .blue {
-  color: #375764;
+  color: hsl(197, 29%, 20%);
 }
 
 .darkblue {
@@ -266,7 +266,7 @@ a {
 }
 
 .hover\:bg-beige:hover {
-  background: #375764;
+  background: hsl(197, 29%, 20%);
 }
 
 .highlight .c {
