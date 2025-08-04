@@ -27,8 +27,19 @@ code {
 }
 
 .highlight {
-  padding: 1rem;
+  padding: 0.5rem;
   background-color: #375764;
+}
+
+.highlighter-rouge {
+  padding: 0.2rem;
+  background-color: #375764;
+}
+
+blockquote {
+  margin: 1rem 0;
+  padding-left: 1rem;
+  border-left: 4px solid #E9C46A;
 }
 
 img {

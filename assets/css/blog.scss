@@ -19,8 +19,19 @@ code{
     background-color: $colorBlue;
 }
 .highlight {
-    padding: 1rem;
+    padding: 0.5rem;
     background-color: $colorBlue;
+}
+
+.highlighter-rouge {
+    padding: 0.2rem;
+    background-color: $colorBlue;
+}
+
+blockquote {
+    margin: 1rem 0;
+    padding-left: 1rem;
+    border-left: 4px solid $colorYellow;
 }
 img{
     margin-top: 1rem;

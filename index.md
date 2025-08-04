@@ -12,5 +12,6 @@ Studies computer science by day to learn the rules, and binary exploitation by n
 Currently pwn@Team Slovakia
 
 ## Achievements
+
 🥇 Zero Days CTF 2025 <br>
 🥈 CyberGame 2024 (Student category) <br>

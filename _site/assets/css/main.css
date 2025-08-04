@@ -100,6 +100,10 @@ a {
   margin-bottom: 0.75rem;
 }
 
+.mb-6 {
+  margin-bottom: 1.5rem;
+}
+
 .mb-12 {
   margin-bottom: 3rem;
 }
@@ -123,11 +127,17 @@ a {
 .centered {
   margin-left: auto;
   margin-right: auto;
-  max-width: 70%;
+  width: 80%;
+  max-width: 100%;
   padding-left: 1rem;
   padding-right: 1rem;
 }
 
+@media (max-width: 768px) {
+  .centered {
+    width: 100%;
+  }
+}
 .text2x1 {
   font-size: 1.5rem;
   line-height: 2rem;
@@ -135,6 +145,10 @@ a {
 
 .text-black {
   color: rgb(0, 0, 0);
+}
+
+.white {
+  color: rgb(255, 255, 255);
 }
 
 .grey5 {
