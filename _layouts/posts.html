@@ -10,7 +10,15 @@
   <body>
     <div class="centered">
       {%- include header.html -%}
-    <p class="centered font-light no-margin text-xl grey5  mb-6 ">  {{ page.subtitle }} </p>
+    
+    <p class="centered font-light no-margin text-xl grey5  mb-3 mt-12 ">  {{ page.title }} </p>
+    <!-- Subtitle: left-aligned inside centered parent -->
+    <div class="centered">
+      <div class="fit-content mt-1 no-margin text-s font-bold grey5 no-margin rounded bg-red pl-2 pr-2">
+      {{ page.subtitle }}
+    </div>
+    </div>
+    
     <div class="centered">{{ content }}</div>
       {%- include footer-off.html -%}
     </div>

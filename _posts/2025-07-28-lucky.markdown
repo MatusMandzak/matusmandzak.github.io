@@ -1,7 +1,7 @@
 ---
 layout: posts
-title:  "Deadsec - Lucky"
-subtitle: Lucky - 4 solves
+title:  "Deadsec 2025- Lucky"
+subtitle: pwn
 date:   2025-07-28 02:00:00 +0200
 ---
 *Exploiting __run_exit_handlers and "lucky" offsets*
@@ -238,8 +238,8 @@ puts@plt(puts@got)
 ```
 
 
-#### Stage 2: The Self-Modifying Exit Handler Chain
-After setting up exit fncs array we call exit to start execution and write `system` with `/bin/sh` as an argument to our predefined spot.
+#### Stage 2: Exit Handler Chain
+After setting up exit fncs array we call exit to start execution and call `system` with `/bin/sh` as an argument to our predefined spot.
 
 ### Azure 
 There was an alarm set up for 60 seconds, so our exploit had to run in that time. The problem was we were not getting our responses fast enough from the server. For that reason we spun up azure vps close to their server and in about an hour we got the flag.

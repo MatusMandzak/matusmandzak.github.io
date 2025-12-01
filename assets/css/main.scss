@@ -27,6 +27,10 @@ a {
     text-decoration: inherit;
 }
 
+p a {
+  text-decoration: underline;
+}
+
 .flex{
     display: flex;
 }
@@ -47,6 +51,7 @@ a {
     align-items: center;
 }
 
+
 .justify-between{
     justify-content: space-between;
 }
@@ -61,9 +66,36 @@ a {
     margin-left: calc(1.5rem * calc(1 - var(--tw-margin-right)));
 }
 
+
+
 .pa-3 {
     padding: 0.75rem;
 }
+
+.pl-1 {
+    padding-left: 0.25rem;
+}
+
+.pl-2 {
+    padding-left: 0.5rem;
+}
+
+.pr-1 {
+    padding-right: 0.25rem;
+}
+
+.pr-2 {
+    padding-right: 0.5rem;
+}
+
+.pt-1 {
+    padding-top: 0.25rem;
+}
+
+.pb-1 {
+    padding-bottom: 0.25rem;
+}
+
 
 .ml-1{
     margin-left: 0.25rem;
@@ -106,6 +138,9 @@ a {
 .mb-12 {
     margin-bottom: 3rem;
 }
+.mt-1 {
+    margin-top: .25rem;
+}
 
 .mt-2 {
     margin-top: .5rem;
@@ -131,6 +166,12 @@ a {
 
 }
 
+.fit-content{
+    width: fit-content;
+}
+
+
+
 @media (max-width: 768px) {
     .centered {
         width: 100%;
@@ -143,6 +184,14 @@ a {
 
 .text-black {
     color: rgb(0,0,0);
+}
+
+.bg-red {
+    background-color: $colorRed;
+}
+
+.rounded{
+    border-radius: 0.5rem;
 }
 
 .white{

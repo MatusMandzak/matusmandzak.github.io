@@ -26,6 +26,10 @@ a {
   text-decoration: inherit;
 }
 
+p a {
+  text-decoration: underline;
+}
+
 .flex {
   display: flex;
 }
@@ -62,6 +66,30 @@ a {
 
 .pa-3 {
   padding: 0.75rem;
+}
+
+.pl-1 {
+  padding-left: 0.25rem;
+}
+
+.pl-2 {
+  padding-left: 0.5rem;
+}
+
+.pr-1 {
+  padding-right: 0.25rem;
+}
+
+.pr-2 {
+  padding-right: 0.5rem;
+}
+
+.pt-1 {
+  padding-top: 0.25rem;
+}
+
+.pb-1 {
+  padding-bottom: 0.25rem;
 }
 
 .ml-1 {
@@ -108,6 +136,10 @@ a {
   margin-bottom: 3rem;
 }
 
+.mt-1 {
+  margin-top: 0.25rem;
+}
+
 .mt-2 {
   margin-top: 0.5rem;
 }
@@ -133,6 +165,10 @@ a {
   padding-right: 1rem;
 }
 
+.fit-content {
+  width: fit-content;
+}
+
 @media (max-width: 768px) {
   .centered {
     width: 100%;
@@ -145,6 +181,14 @@ a {
 
 .text-black {
   color: rgb(0, 0, 0);
+}
+
+.bg-red {
+  background-color: #E76F51;
+}
+
+.rounded {
+  border-radius: 0.5rem;
 }
 
 .white {

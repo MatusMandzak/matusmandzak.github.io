@@ -4,14 +4,13 @@ title: "Home"
 subtitle: ""
 ---
 ## About
-Matúš, 19yo, student who talks to software in a language it wasn't meant to understand. Probably discovered the magic of computing not in "Hello, World!" but in making a program crash on purpose. Believes "segmentation fault" isn't just an error, but an invitation.  While his classmates learned Python, he started learning the secret dialects of memory and registers. He doesn't just talk to computers; he convinces them to spill their secrets.
-
-Studies computer science by day to learn the rules, and binary exploitation by night to break them. He’s not a master yet, just a dedicated student on a quest to become fluent in pwning. Fueled by a passion for research and the belief that the most interesting code is the part that isn't supposed to run.
+Hello, I'm Matúš, alias "buffyo". I come from Slovakia and I was born in 2005. I am currently an undergraduade student at Technical Unversity of Košice with focus on cybersecurity. I love CTF, hacking and anything that's intereting enough. Currently I'm part of [Slovak Cyber Team](https://cyberteam.sk/), where I specialize on binary exploitation (and reverse engineering). I have also competed in European Cyber Security Challenge (ECSC) as part of Team Slovakia (2024-2025). I believe the best way to learn is by doing and sharing knowledge with others. In the future I am looking to specialize in vulnerability research. Amongst the other things, I love to play volleyball and do photography.
 
 
-Currently pwn@Team Slovakia
+Currently pwn@Slovak Cyber Team
 
 ## Achievements
-
+4th DefCamp Finals 2025<br>
+4th ECSC 2025<br>
 🥇 Zero Days CTF 2025 <br>
-🥈 CyberGame 2024 (Student category) <br>
+🥈 CyberGame 2024 (Individual Student Category) <br>

